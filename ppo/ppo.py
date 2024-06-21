@@ -105,6 +105,7 @@ class PPO(OnPolicyAlgorithm):
         seed: Optional[int] = None,
         device: Union[th.device, str] = "auto",
         _init_setup_model: bool = True,
+        num_agent: int = 1,
     ):
         super().__init__(
             policy,
@@ -133,6 +134,7 @@ class PPO(OnPolicyAlgorithm):
                 spaces.MultiDiscrete,
                 spaces.MultiBinary,
             ),
+            num_agent=num_agent,
         )
 
         # Sanity check, otherwise it will lead to noisy gradient and NaN

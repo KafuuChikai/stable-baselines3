@@ -6,6 +6,7 @@ import os
 import time
 from glob import glob
 from typing import Any, Dict, List, Optional, SupportsFloat, Tuple, Union
+import numpy as np
 
 import gymnasium as gym
 import pandas
@@ -92,7 +93,11 @@ class Monitor(gym.Wrapper[ObsType, ActType, ObsType, ActType]):
         if self.needs_reset:
             raise RuntimeError("Tried to step environment that needs reset")
         observation, reward, terminated, truncated, info = self.env.step(action)
-        self.rewards.append(float(reward))
+        # self.rewards.append(float(reward))
+        if isinstance(reward, np.ndarray):
+            self.rewards.append(float(reward[0]))
+        else:
+            self.rewards.append(float(reward))
         if terminated or truncated:
             self.needs_reset = True
             ep_rew = sum(self.rewards)

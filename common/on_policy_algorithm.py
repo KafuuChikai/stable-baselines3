@@ -81,6 +81,7 @@ class OnPolicyAlgorithm(BaseAlgorithm):
         device: Union[th.device, str] = "auto",
         _init_setup_model: bool = True,
         supported_action_spaces: Optional[Tuple[Type[spaces.Space], ...]] = None,
+        num_agent: int = 1,
     ):
         super().__init__(
             policy=policy,
@@ -98,7 +99,8 @@ class OnPolicyAlgorithm(BaseAlgorithm):
             supported_action_spaces=supported_action_spaces,
         )
 
-        self.n_steps = n_steps
+        self.num_agent = num_agent
+        self.n_steps = n_steps * self.num_agent
         self.gamma = gamma
         self.gae_lambda = gae_lambda
         self.ent_coef = ent_coef
@@ -174,22 +176,38 @@ class OnPolicyAlgorithm(BaseAlgorithm):
 
             with th.no_grad():
                 # Convert to pytorch tensor or to TensorDict
-                obs_tensor = obs_as_tensor(self._last_obs, self.device)
-                actions, values, log_probs = self.policy(obs_tensor)
-            actions = actions.cpu().numpy()
+                if self.num_agent > 1:
+                    obs_tensor = [obs_as_tensor(self._last_obs[:, i, :], self.device) for i in range(self.num_agent)]
+                    actions, values, log_probs = [], [], []
+                    for i in range(self.num_agent):
+                        actions_i, values_i, log_probs_i = self.policy(obs_tensor[i])
+                        actions.append(actions_i)
+                        values.append(values_i)
+                        log_probs.append(log_probs_i)
+                else:
+                    obs_tensor = obs_as_tensor(self._last_obs, self.device)
+                    actions, values, log_probs = self.policy(obs_tensor)
+            if self.num_agent > 1:
+                actions = th.stack(actions).cpu().numpy()
+            else:
+                actions = actions.cpu().numpy()
 
             # Rescale and perform action
             clipped_actions = actions
 
-            if isinstance(self.action_space, spaces.Box):
-                if self.policy.squash_output:
-                    # Unscale the actions to match env bounds
-                    # if they were previously squashed (scaled in [-1, 1])
-                    clipped_actions = self.policy.unscale_action(clipped_actions)
-                else:
-                    # Otherwise, clip the actions to avoid out of bound error
-                    # as we are sampling from an unbounded Gaussian distribution
-                    clipped_actions = np.clip(actions, self.action_space.low, self.action_space.high)
+            if self.num_agent > 1:
+                clipped_actions = np.array([np.clip(actions[i], self.action_space.low, self.action_space.high) for i in range(self.num_agent)])
+                clipped_actions = clipped_actions.swapaxes(0, 1)
+            else:
+                if isinstance(self.action_space, spaces.Box):
+                    if self.policy.squash_output:
+                        # Unscale the actions to match env bounds
+                        # if they were previously squashed (scaled in [-1, 1])
+                        clipped_actions = self.policy.unscale_action(clipped_actions)
+                    else:
+                        # Otherwise, clip the actions to avoid out of bound error
+                        # as we are sampling from an unbounded Gaussian distribution
+                        clipped_actions = np.clip(actions, self.action_space.low, self.action_space.high)
 
             new_obs, rewards, dones, infos = env.step(clipped_actions)
 
@@ -201,7 +219,7 @@ class OnPolicyAlgorithm(BaseAlgorithm):
                 return False
 
             self._update_info_buffer(infos)
-            n_steps += 1
+            n_steps += self.num_agent
 
             if isinstance(self.action_space, spaces.Discrete):
                 # Reshape in case of discrete action
@@ -215,27 +233,53 @@ class OnPolicyAlgorithm(BaseAlgorithm):
                     and infos[idx].get("terminal_observation") is not None
                     and infos[idx].get("TimeLimit.truncated", False)
                 ):
-                    terminal_obs = self.policy.obs_to_tensor(infos[idx]["terminal_observation"])[0]
-                    with th.no_grad():
-                        terminal_value = self.policy.predict_values(terminal_obs)[0]  # type: ignore[arg-type]
-                    rewards[idx] += self.gamma * terminal_value
+                    if self.num_agent > 1:
+                        terminal_obs = [self.policy.obs_to_tensor(infos[idx]["terminal_observation"][i])[0] for i in range(self.num_agent)]
+                        with th.no_grad():
+                            terminal_value = np.hstack([self.policy.predict_values(terminal_obs[i])[0].cpu() for i in range(self.num_agent)])
+                        rewards[idx] += self.gamma * terminal_value
+                    else:
+                        terminal_obs = self.policy.obs_to_tensor(infos[idx]["terminal_observation"])[0]
+                        with th.no_grad():
+                            terminal_value = self.policy.predict_values(terminal_obs)[0]  # type: ignore[arg-type]
+                        rewards[idx] += self.gamma * terminal_value
 
-            rollout_buffer.add(
-                self._last_obs,  # type: ignore[arg-type]
-                actions,
-                rewards,
-                self._last_episode_starts,  # type: ignore[arg-type]
-                values,
-                log_probs,
-            )
+            if self.num_agent > 1:
+                for i in range(self.num_agent):
+                    rollout_buffer.add(
+                        self._last_obs[:, i, :],  # type: ignore[arg-type]
+                        actions[i],
+                        rewards[:, i],
+                        self._last_episode_starts,  # type: ignore[arg-type]
+                        values[i],
+                        log_probs[i],
+                    )
+            else:
+                rollout_buffer.add(
+                    self._last_obs,  # type: ignore[arg-type]
+                    actions,
+                    rewards,
+                    self._last_episode_starts,  # type: ignore[arg-type]
+                    values,
+                    log_probs,
+                )
             self._last_obs = new_obs  # type: ignore[assignment]
             self._last_episode_starts = dones
 
-        with th.no_grad():
-            # Compute value for the last timestep
-            values = self.policy.predict_values(obs_as_tensor(new_obs, self.device))  # type: ignore[arg-type]
+        if self.num_agent > 1:
+            with th.no_grad():
+                # Compute value for the last timestep
+                values = [self.policy.predict_values(obs_as_tensor(new_obs[:, i, :], self.device)) for i in range(self.num_agent)]
+        else:
+            with th.no_grad():
+                # Compute value for the last timestep
+                values = self.policy.predict_values(obs_as_tensor(new_obs, self.device))  # type: ignore[arg-type]
 
-        rollout_buffer.compute_returns_and_advantage(last_values=values, dones=dones)
+        if self.num_agent > 1:
+            for i in range(self.num_agent):
+                rollout_buffer.compute_returns_and_advantage(last_values=values[i], dones=dones, num_agent=self.num_agent, agent_id=i)
+        else:
+            rollout_buffer.compute_returns_and_advantage(last_values=values, dones=dones)
 
         callback.update_locals(locals())
 

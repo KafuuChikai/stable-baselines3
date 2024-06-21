@@ -399,7 +399,7 @@ class RolloutBuffer(BaseBuffer):
         self.generator_ready = False
         super().reset()
 
-    def compute_returns_and_advantage(self, last_values: th.Tensor, dones: np.ndarray) -> None:
+    def compute_returns_and_advantage(self, last_values: th.Tensor, dones: np.ndarray, num_agent: int = 1, agent_id: int = 0) -> None:
         """
         Post-processing step: compute the lambda-return (TD(lambda) estimate)
         and GAE(lambda) advantage.
@@ -418,23 +418,39 @@ class RolloutBuffer(BaseBuffer):
         :param last_values: state value estimation for the last step (one for each env)
         :param dones: if the last step was a terminal step (one bool for each env).
         """
-        # Convert to numpy
-        last_values = last_values.clone().cpu().numpy().flatten()
+        if num_agent == 1:
+            # Convert to numpy
+            last_values = last_values.clone().cpu().numpy().flatten()
 
-        last_gae_lam = 0
-        for step in reversed(range(self.buffer_size)):
-            if step == self.buffer_size - 1:
-                next_non_terminal = 1.0 - dones
-                next_values = last_values
-            else:
-                next_non_terminal = 1.0 - self.episode_starts[step + 1]
-                next_values = self.values[step + 1]
-            delta = self.rewards[step] + self.gamma * next_values * next_non_terminal - self.values[step]
-            last_gae_lam = delta + self.gamma * self.gae_lambda * next_non_terminal * last_gae_lam
-            self.advantages[step] = last_gae_lam
-        # TD(lambda) estimator, see Github PR #375 or "Telescoping in TD(lambda)"
-        # in David Silver Lecture 4: https://www.youtube.com/watch?v=PnHCvfgC_ZA
-        self.returns = self.advantages + self.values
+            last_gae_lam = 0
+            for step in reversed(range(self.buffer_size)):
+                if step == self.buffer_size - 1:
+                    next_non_terminal = 1.0 - dones
+                    next_values = last_values
+                else:
+                    next_non_terminal = 1.0 - self.episode_starts[step + 1]
+                    next_values = self.values[step + 1]
+                delta = self.rewards[step] + self.gamma * next_values * next_non_terminal - self.values[step]
+                last_gae_lam = delta + self.gamma * self.gae_lambda * next_non_terminal * last_gae_lam
+                self.advantages[step] = last_gae_lam
+            # TD(lambda) estimator, see Github PR #375 or "Telescoping in TD(lambda)"
+            # in David Silver Lecture 4: https://www.youtube.com/watch?v=PnHCvfgC_ZA
+            self.returns = self.advantages + self.values
+        elif num_agent > 1:
+            last_values = last_values.clone().cpu().numpy().flatten()
+            
+            last_gae_lam = 0
+            for step in reversed(range(agent_id, self.buffer_size, num_agent)):
+                if step == self.buffer_size - 1 - (num_agent - 1 - agent_id):
+                    next_non_terminal = 1.0 - dones
+                    next_values = last_values
+                else:
+                    next_non_terminal = 1.0 - self.episode_starts[step + num_agent]
+                    next_values = self.values[step + num_agent]
+                delta = self.rewards[step] + self.gamma * next_values * next_non_terminal - self.values[step]
+                last_gae_lam = delta + self.gamma * self.gae_lambda * next_non_terminal * last_gae_lam
+                self.advantages[step] = last_gae_lam
+                self.returns[step] = self.advantages[step] + self.values[step]
 
     def add(
         self,
