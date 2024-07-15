@@ -106,6 +106,8 @@ class PPO(OnPolicyAlgorithm):
         device: Union[th.device, str] = "auto",
         _init_setup_model: bool = True,
         num_agent: int = 1,
+        use_share_obs: bool = False,
+        use_active_masks: bool = False,
     ):
         super().__init__(
             policy,
@@ -135,7 +137,13 @@ class PPO(OnPolicyAlgorithm):
                 spaces.MultiBinary,
             ),
             num_agent=num_agent,
+            use_share_obs=use_share_obs,
+            use_active_masks=use_active_masks,
         )
+
+        assert (
+            not use_share_obs or not policy_kwargs.get("share_features_extractor", True)
+        ), "if use_share_obs, the policy should set share_features_extractor = False, now the default is True"
 
         # Sanity check, otherwise it will lead to noisy gradient and NaN
         # because of the advantage normalization
@@ -220,12 +228,19 @@ class PPO(OnPolicyAlgorithm):
                 values = values.flatten()
                 # Normalize advantage
                 advantages = rollout_data.advantages
+                if self.use_active_masks:
+                    advantages = rollout_data.advantages[rollout_data.active_masks]
+                else:
+                    advantages = rollout_data.advantages
                 # Normalization does not make sense if mini batchsize == 1, see GH issue #325
                 if self.normalize_advantage and len(advantages) > 1:
                     advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
                 # ratio between old and new policy, should be one at the first iteration
-                ratio = th.exp(log_prob - rollout_data.old_log_prob)
+                if self.use_active_masks:
+                    ratio = th.exp(log_prob[rollout_data.active_masks] - rollout_data.old_log_prob[rollout_data.active_masks])
+                else:
+                    ratio = th.exp(log_prob - rollout_data.old_log_prob)
 
                 # clipped surrogate loss
                 policy_loss_1 = advantages * ratio
@@ -247,7 +262,10 @@ class PPO(OnPolicyAlgorithm):
                         values - rollout_data.old_values, -clip_range_vf, clip_range_vf
                     )
                 # Value loss using the TD(gae_lambda) target
-                value_loss = F.mse_loss(rollout_data.returns, values_pred)
+                if self.use_active_masks:
+                    value_loss = F.mse_loss(rollout_data.returns[rollout_data.active_masks], values_pred[rollout_data.active_masks])
+                else:
+                    value_loss = F.mse_loss(rollout_data.returns, values_pred)
                 value_losses.append(value_loss.item())
 
                 # Entropy loss favor exploration
@@ -255,7 +273,10 @@ class PPO(OnPolicyAlgorithm):
                     # Approximate entropy when no analytical form
                     entropy_loss = -th.mean(-log_prob)
                 else:
-                    entropy_loss = -th.mean(entropy)
+                    if self.use_active_masks:
+                        entropy_loss = -th.mean(entropy[rollout_data.active_masks])
+                    else:
+                        entropy_loss = -th.mean(entropy)
 
                 entropy_losses.append(entropy_loss.item())
 
@@ -266,7 +287,10 @@ class PPO(OnPolicyAlgorithm):
                 # and discussion in PR #419: https://github.com/DLR-RM/stable-baselines3/pull/419
                 # and Schulman blog: http://joschu.net/blog/kl-approx.html
                 with th.no_grad():
-                    log_ratio = log_prob - rollout_data.old_log_prob
+                    if self.use_active_masks:
+                        log_ratio = log_prob[rollout_data.active_masks] - rollout_data.old_log_prob[rollout_data.active_masks]
+                    else:
+                        log_ratio = log_prob - rollout_data.old_log_prob
                     approx_kl_div = th.mean((th.exp(log_ratio) - 1) - log_ratio).cpu().numpy()
                     approx_kl_divs.append(approx_kl_div)
 
@@ -287,7 +311,10 @@ class PPO(OnPolicyAlgorithm):
             if not continue_training:
                 break
 
-        explained_var = explained_variance(self.rollout_buffer.values.flatten(), self.rollout_buffer.returns.flatten())
+        if self.use_active_masks:
+            explained_var = explained_variance(self.rollout_buffer.values[self.rollout_buffer.active_masks].flatten(), self.rollout_buffer.returns[self.rollout_buffer.active_masks].flatten())
+        else:
+            explained_var = explained_variance(self.rollout_buffer.values.flatten(), self.rollout_buffer.returns.flatten())
 
         # Logs
         self.logger.record("train/entropy_loss", np.mean(entropy_losses))

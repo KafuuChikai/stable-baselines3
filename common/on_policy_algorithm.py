@@ -7,7 +7,7 @@ import torch as th
 from gymnasium import spaces
 
 from stable_baselines3.common.base_class import BaseAlgorithm
-from stable_baselines3.common.buffers import DictRolloutBuffer, RolloutBuffer
+from stable_baselines3.common.buffers import DictRolloutBuffer, RolloutBuffer, RolloutShareBuffer
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.policies import ActorCriticPolicy
 from stable_baselines3.common.type_aliases import GymEnv, MaybeCallback, Schedule
@@ -54,7 +54,7 @@ class OnPolicyAlgorithm(BaseAlgorithm):
     :param supported_action_spaces: The action spaces supported by the algorithm.
     """
 
-    rollout_buffer: RolloutBuffer
+    rollout_buffer: Union[RolloutBuffer, RolloutShareBuffer]
     policy: ActorCriticPolicy
 
     def __init__(
@@ -82,6 +82,8 @@ class OnPolicyAlgorithm(BaseAlgorithm):
         _init_setup_model: bool = True,
         supported_action_spaces: Optional[Tuple[Type[spaces.Space], ...]] = None,
         num_agent: int = 1,
+        use_share_obs: bool = False,
+        use_active_masks: bool = False,
     ):
         super().__init__(
             policy=policy,
@@ -108,6 +110,7 @@ class OnPolicyAlgorithm(BaseAlgorithm):
         self.max_grad_norm = max_grad_norm
         self.rollout_buffer_class = rollout_buffer_class
         self.rollout_buffer_kwargs = rollout_buffer_kwargs or {}
+        self.use_active_masks = use_active_masks
 
         if _init_setup_model:
             self._setup_model()
@@ -120,7 +123,11 @@ class OnPolicyAlgorithm(BaseAlgorithm):
             if isinstance(self.observation_space, spaces.Dict):
                 self.rollout_buffer_class = DictRolloutBuffer
             else:
-                self.rollout_buffer_class = RolloutBuffer
+                if self.use_active_masks:
+                    self.rollout_buffer_class = RolloutShareBuffer
+                    self.rollout_buffer_kwargs["n_agent"] = self.num_agent
+                else:
+                    self.rollout_buffer_class = RolloutBuffer
 
         self.rollout_buffer = self.rollout_buffer_class(
             self.n_steps,
@@ -141,7 +148,7 @@ class OnPolicyAlgorithm(BaseAlgorithm):
         self,
         env: VecEnv,
         callback: BaseCallback,
-        rollout_buffer: RolloutBuffer,
+        rollout_buffer: Union[RolloutBuffer, RolloutShareBuffer],
         n_rollout_steps: int,
     ) -> bool:
         """
@@ -189,6 +196,8 @@ class OnPolicyAlgorithm(BaseAlgorithm):
                     actions, values, log_probs = self.policy(obs_tensor)
             if self.num_agent > 1:
                 actions = th.stack(actions).cpu().numpy()
+                values = th.stack(values)
+                log_probs = th.stack(log_probs)
             else:
                 actions = actions.cpu().numpy()
 
@@ -244,16 +253,31 @@ class OnPolicyAlgorithm(BaseAlgorithm):
                             terminal_value = self.policy.predict_values(terminal_obs)[0]  # type: ignore[arg-type]
                         rewards[idx] += self.gamma * terminal_value
 
+            if self.use_active_masks:
+                active_masks = np.stack([info.get("active_mask") for info in infos])
+
             if self.num_agent > 1:
-                for i in range(self.num_agent):
-                    rollout_buffer.add(
-                        self._last_obs[:, i, :],  # type: ignore[arg-type]
-                        actions[i],
-                        rewards[:, i],
-                        self._last_episode_starts,  # type: ignore[arg-type]
-                        values[i],
-                        log_probs[i],
-                    )
+                if self.use_active_masks:
+                    for i in range(self.num_agent):
+                        rollout_buffer.add(
+                            self._last_obs[:, i, :],  # type: ignore[arg-type]
+                            actions[i, :, :],
+                            rewards[:, i],
+                            self._last_episode_starts,  # type: ignore[arg-type]
+                            values[i, :],
+                            log_probs[i, :],
+                            active_masks[:, i],
+                        )
+                else:
+                    for i in range(self.num_agent):
+                        rollout_buffer.add(
+                            self._last_obs[:, i, :],  # type: ignore[arg-type]
+                            actions[i, :, :],
+                            rewards[:, i],
+                            self._last_episode_starts,  # type: ignore[arg-type]
+                            values[i, :],
+                            log_probs[i, :],
+                        )
             else:
                 rollout_buffer.add(
                     self._last_obs,  # type: ignore[arg-type]

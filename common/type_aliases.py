@@ -36,6 +36,16 @@ class RolloutBufferSamples(NamedTuple):
     returns: th.Tensor
 
 
+class ShareRolloutBufferSamples(NamedTuple):
+    observations: th.Tensor
+    actions: th.Tensor
+    old_values: th.Tensor
+    old_log_prob: th.Tensor
+    advantages: th.Tensor
+    returns: th.Tensor
+    active_masks: th.Tensor
+
+
 class DictRolloutBufferSamples(NamedTuple):
     observations: TensorDict
     actions: th.Tensor
