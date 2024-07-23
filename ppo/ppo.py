@@ -8,7 +8,7 @@ from torch.nn import functional as F
 
 from stable_baselines3.common.buffers import RolloutBuffer
 from stable_baselines3.common.on_policy_algorithm import OnPolicyAlgorithm
-from stable_baselines3.common.policies import ActorCriticCnnPolicy, ActorCriticPolicy, BasePolicy, MultiInputActorCriticPolicy
+from stable_baselines3.common.policies import ActorCriticCnnPolicy, ActorCriticPolicy, BasePolicy, MultiInputActorCriticPolicy, ActorCriticSharePolicy
 from stable_baselines3.common.type_aliases import GymEnv, MaybeCallback, Schedule
 from stable_baselines3.common.utils import explained_variance, get_schedule_fn
 
@@ -73,6 +73,7 @@ class PPO(OnPolicyAlgorithm):
 
     policy_aliases: ClassVar[Dict[str, Type[BasePolicy]]] = {
         "MlpPolicy": ActorCriticPolicy,
+        "MlpSharePolicy": ActorCriticSharePolicy,
         "CnnPolicy": ActorCriticCnnPolicy,
         "MultiInputPolicy": MultiInputActorCriticPolicy,
     }
@@ -108,6 +109,8 @@ class PPO(OnPolicyAlgorithm):
         num_agent: int = 1,
         use_share_obs: bool = False,
         use_active_masks: bool = False,
+        use_share_obs_env: bool = False,
+        use_valuenorm: bool = False,
     ):
         super().__init__(
             policy,
@@ -139,11 +142,9 @@ class PPO(OnPolicyAlgorithm):
             num_agent=num_agent,
             use_share_obs=use_share_obs,
             use_active_masks=use_active_masks,
+            use_share_obs_env=use_share_obs_env,
+            use_valuenorm=use_valuenorm,
         )
-
-        assert (
-            not use_share_obs or not policy_kwargs.get("share_features_extractor", True)
-        ), "if use_share_obs, the policy should set share_features_extractor = False, now the default is True"
 
         # Sanity check, otherwise it will lead to noisy gradient and NaN
         # because of the advantage normalization
@@ -224,7 +225,10 @@ class PPO(OnPolicyAlgorithm):
                 if self.use_sde:
                     self.policy.reset_noise(self.batch_size)
 
-                values, log_prob, entropy = self.policy.evaluate_actions(rollout_data.observations, actions)
+                if self.use_share_obs:
+                    values, log_prob, entropy = self.policy.evaluate_actions(rollout_data.observations, rollout_data.share_observations, actions)
+                else:
+                    values, log_prob, entropy = self.policy.evaluate_actions(rollout_data.observations, actions)
                 values = values.flatten()
                 # Normalize advantage
                 advantages = rollout_data.advantages
@@ -261,9 +265,14 @@ class PPO(OnPolicyAlgorithm):
                     values_pred = rollout_data.old_values + th.clamp(
                         values - rollout_data.old_values, -clip_range_vf, clip_range_vf
                     )
+                
                 # Value loss using the TD(gae_lambda) target
                 if self.use_active_masks:
-                    value_loss = F.mse_loss(rollout_data.returns[rollout_data.active_masks], values_pred[rollout_data.active_masks])
+                    if self.use_valuenorm:
+                        value_loss = F.mse_loss(self.rollout_buffer.value_normalizer.normalize(rollout_data.returns).flatten()[rollout_data.active_masks],
+                                                values_pred[rollout_data.active_masks])
+                    else:
+                        value_loss = F.mse_loss(rollout_data.returns[rollout_data.active_masks], values_pred[rollout_data.active_masks])
                 else:
                     value_loss = F.mse_loss(rollout_data.returns, values_pred)
                 value_losses.append(value_loss.item())
@@ -312,7 +321,11 @@ class PPO(OnPolicyAlgorithm):
                 break
 
         if self.use_active_masks:
-            explained_var = explained_variance(self.rollout_buffer.values[self.rollout_buffer.active_masks].flatten(), self.rollout_buffer.returns[self.rollout_buffer.active_masks].flatten())
+            if self.use_valuenorm:
+                explained_var = explained_variance(self.rollout_buffer.value_normalizer.denormalize(self.rollout_buffer.values[self.rollout_buffer.active_masks]).flatten(),
+                                                   self.rollout_buffer.returns[self.rollout_buffer.active_masks].flatten())
+            else:
+                explained_var = explained_variance(self.rollout_buffer.values[self.rollout_buffer.active_masks].flatten(), self.rollout_buffer.returns[self.rollout_buffer.active_masks].flatten())
         else:
             explained_var = explained_variance(self.rollout_buffer.values.flatten(), self.rollout_buffer.returns.flatten())
 
