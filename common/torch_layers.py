@@ -262,6 +262,7 @@ class MlpShareExtractor(nn.Module):
         activation_fn: Type[nn.Module],
         value_activation_fn: Optional[Type[nn.Module]] = None,
         device: Union[th.device, str] = "auto",
+        use_layer_norm: bool = False,
     ) -> None:
         super().__init__()
         device = get_device(device)
@@ -280,11 +281,15 @@ class MlpShareExtractor(nn.Module):
         # Iterate through the policy layers and build the policy net
         for curr_layer_dim in pi_layers_dims:
             policy_net.append(nn.Linear(last_layer_dim_pi, curr_layer_dim))
+            if use_layer_norm:
+                policy_net.append(nn.LayerNorm(curr_layer_dim))
             policy_net.append(activation_fn())
             last_layer_dim_pi = curr_layer_dim
         # Iterate through the value layers and build the value net
         for curr_layer_dim in vf_layers_dims:
             value_net.append(nn.Linear(last_layer_dim_vf, curr_layer_dim))
+            if use_layer_norm:
+                value_net.append(nn.LayerNorm(curr_layer_dim))
             if value_activation_fn is not None:
                 value_net.append(value_activation_fn())
             else:

@@ -279,11 +279,17 @@ class OnPolicyAlgorithm(BaseAlgorithm):
                         if self.use_share_obs:
                             terminal_share_obs = [self.policy.obs_to_tensor(infos[idx]["terminal_share_observation"][i], share_obs=True)[0] for i in range(self.num_agent)]
                             with th.no_grad():
-                                terminal_value = np.hstack([self.policy.predict_values(terminal_share_obs[i])[0].cpu() for i in range(self.num_agent)])
+                                if self.use_valuenorm:
+                                    terminal_value = np.hstack([self.value_normalizer.denormalize(self.policy.predict_values(terminal_share_obs[i])[0].cpu()).flatten() for i in range(self.num_agent)])
+                                else:
+                                    terminal_value = np.hstack([self.policy.predict_values(terminal_share_obs[i])[0].cpu() for i in range(self.num_agent)])
                         else:
                             terminal_obs = [self.policy.obs_to_tensor(infos[idx]["terminal_observation"][i])[0] for i in range(self.num_agent)]
                             with th.no_grad():
-                                terminal_value = np.hstack([self.policy.predict_values(terminal_obs[i])[0].cpu() for i in range(self.num_agent)])
+                                if self.use_valuenorm:
+                                    terminal_value = np.hstack([self.value_normalizer.denormalize(self.policy.predict_values(terminal_obs[i])[0].cpu()).flatten() for i in range(self.num_agent)])
+                                else:
+                                    terminal_value = np.hstack([self.policy.predict_values(terminal_obs[i])[0].cpu() for i in range(self.num_agent)])
                         rewards[idx] += self.gamma * terminal_value
                     else:
                         terminal_obs = self.policy.obs_to_tensor(infos[idx]["terminal_observation"])[0]

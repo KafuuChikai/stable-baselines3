@@ -814,6 +814,7 @@ class ActorCriticSharePolicy(BasePolicy):
         optimizer_class: Type[th.optim.Optimizer] = th.optim.Adam,
         optimizer_kwargs: Optional[Dict[str, Any]] = None,
         value_activation_fn: Optional[Type[nn.Module]] = None,
+        use_layer_norm: bool = False,
     ):
         if optimizer_kwargs is None:
             optimizer_kwargs = {}
@@ -854,6 +855,7 @@ class ActorCriticSharePolicy(BasePolicy):
         self.activation_fn = activation_fn
         self.value_activation_fn = value_activation_fn
         self.ortho_init = ortho_init
+        self.use_layer_norm = use_layer_norm
 
         self.pi_features_extractor = self.make_features_extractor(self.observation_space)
         self.vf_features_extractor = self.make_features_extractor(self.share_observation_space)
@@ -935,6 +937,7 @@ class ActorCriticSharePolicy(BasePolicy):
             activation_fn=self.activation_fn,
             value_activation_fn=self.value_activation_fn,
             device=self.device,
+            use_layer_norm=self.use_layer_norm,
         )
 
     def _build(self, lr_schedule: Schedule) -> None:
@@ -1168,6 +1171,63 @@ class ActorCriticSharePolicy(BasePolicy):
         else:
             preprocessed_obs = preprocess_obs(obs, self.observation_space, normalize_images=self.normalize_images)
         return features_extractor(preprocessed_obs)
+
+    def predict(
+        self,
+        observation: Union[np.ndarray, Dict[str, np.ndarray]],
+        state: Optional[Tuple[np.ndarray, ...]] = None,
+        episode_start: Optional[np.ndarray] = None,
+        deterministic: bool = False,
+    ) -> Tuple[np.ndarray, Optional[Tuple[np.ndarray, ...]]]:
+        """
+        Get the policy action from an observation (and optional hidden state).
+        Includes sugar-coating to handle different observations (e.g. normalizing images).
+
+        :param observation: the input observation
+        :param state: The last hidden states (can be None, used in recurrent policies)
+        :param episode_start: The last masks (can be None, used in recurrent policies)
+            this correspond to beginning of episodes,
+            where the hidden states of the RNN must be reset.
+        :param deterministic: Whether or not to return deterministic actions.
+        :return: the model's action and the next hidden state
+            (used in recurrent policies)
+        """
+        # Switch to eval mode (this affects batch norm / dropout)
+        self.set_training_mode(False)
+
+        # Check for common mistake that the user does not mix Gym/VecEnv API
+        # Tuple obs are not supported by SB3, so we can safely do that check
+        if isinstance(observation, tuple) and len(observation) == 2 and isinstance(observation[1], dict):
+            raise ValueError(
+                "You have passed a tuple to the predict() function instead of a Numpy array or a Dict. "
+                "You are probably mixing Gym API with SB3 VecEnv API: `obs, info = env.reset()` (Gym) "
+                "vs `obs = vec_env.reset()` (SB3 VecEnv). "
+                "See related issue https://github.com/DLR-RM/stable-baselines3/issues/1694 "
+                "and documentation for more information: https://stable-baselines3.readthedocs.io/en/master/guide/vec_envs.html#vecenv-api-vs-gym-api"
+            )
+
+        obs_tensor, vectorized_env = self.obs_to_tensor(observation)
+
+        with th.no_grad():
+            actions = self._predict(obs_tensor, deterministic=deterministic)
+        # Convert to numpy, and reshape to the original action shape
+        actions = actions.cpu().numpy().reshape((-1, *self.action_space.shape))  # type: ignore[misc]
+
+        if isinstance(self.action_space, spaces.Box):
+            if self.squash_output:
+                # Rescale to proper domain when using squashing
+                actions = self.unscale_action(actions)  # type: ignore[assignment, arg-type]
+            else:
+                # Actions could be on arbitrary scale, so clip the actions to avoid
+                # out of bound error (e.g. if sampling from a Gaussian distribution)
+                actions = np.tanh(actions)  # type: ignore[assignment, arg-type]
+
+        # Remove batch dimension if needed
+        if not vectorized_env:
+            assert isinstance(actions, np.ndarray)
+            actions = actions.squeeze(axis=0)
+
+        return actions, state  # type: ignore[return-value]
 
 
 class ActorCriticCnnPolicy(ActorCriticPolicy):
