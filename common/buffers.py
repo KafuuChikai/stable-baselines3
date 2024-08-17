@@ -385,11 +385,13 @@ class RolloutBuffer(BaseBuffer):
         gae_lambda: float = 1,
         gamma: float = 0.99,
         n_envs: int = 1,
+        value_normalizer: Optional[ValueNorm] = None,
     ):
         super().__init__(buffer_size, observation_space, action_space, device, n_envs=n_envs)
         self.gae_lambda = gae_lambda
         self.gamma = gamma
         self.generator_ready = False
+        self.value_normalizer = value_normalizer
         self.reset()
 
     def reset(self) -> None:
@@ -423,25 +425,29 @@ class RolloutBuffer(BaseBuffer):
         :param last_values: state value estimation for the last step (one for each env)
         :param dones: if the last step was a terminal step (one bool for each env).
         """
-        if num_agent == 1:
-            # Convert to numpy
-            last_values = last_values.clone().cpu().numpy().flatten()
+        # when use default num_agent = 1 and agent_id = 0, this function works the same as RolloutBuffer
+        # Convert to numpy
+        # if self.use_valuenorm:
+        if self.value_normalizer is not None:
+            # print(self.value_normalizer.running_mean, self.value_normalizer.running_mean_sq)
+            denormalize_last_values = self.value_normalizer.denormalize(last_values.clone().cpu().numpy().flatten())
+            denormalize_values = self.value_normalizer.denormalize(self.values)
 
             last_gae_lam = 0
-            for step in reversed(range(self.buffer_size)):
-                if step == self.buffer_size - 1:
+            for step in reversed(range(agent_id, self.buffer_size, num_agent)):
+                if step == self.buffer_size - 1 - (num_agent - 1 - agent_id):
                     next_non_terminal = 1.0 - dones
-                    next_values = last_values
+                    next_values = denormalize_last_values
                 else:
-                    next_non_terminal = 1.0 - self.episode_starts[step + 1]
-                    next_values = self.values[step + 1]
-                delta = self.rewards[step] + self.gamma * next_values * next_non_terminal - self.values[step]
+                    next_non_terminal = 1.0 - self.episode_starts[step + num_agent]
+                    next_values = denormalize_values[step + num_agent]
+                delta = self.rewards[step] + self.gamma * next_values * next_non_terminal - denormalize_values[step]
                 last_gae_lam = delta + self.gamma * self.gae_lambda * next_non_terminal * last_gae_lam
                 self.advantages[step] = last_gae_lam
-            # TD(lambda) estimator, see Github PR #375 or "Telescoping in TD(lambda)"
-            # in David Silver Lecture 4: https://www.youtube.com/watch?v=PnHCvfgC_ZA
-            self.returns = self.advantages + self.values
-        elif num_agent > 1:
+                # TD(lambda) estimator, see Github PR #375 or "Telescoping in TD(lambda)"
+                # in David Silver Lecture 4: https://www.youtube.com/watch?v=PnHCvfgC_ZA
+                self.returns[step] = self.advantages[step] + denormalize_values[step]
+        else:
             last_values = last_values.clone().cpu().numpy().flatten()
             
             last_gae_lam = 0
@@ -455,6 +461,8 @@ class RolloutBuffer(BaseBuffer):
                 delta = self.rewards[step] + self.gamma * next_values * next_non_terminal - self.values[step]
                 last_gae_lam = delta + self.gamma * self.gae_lambda * next_non_terminal * last_gae_lam
                 self.advantages[step] = last_gae_lam
+                # TD(lambda) estimator, see Github PR #375 or "Telescoping in TD(lambda)"
+                # in David Silver Lecture 4: https://www.youtube.com/watch?v=PnHCvfgC_ZA
                 self.returns[step] = self.advantages[step] + self.values[step]
 
     def add(

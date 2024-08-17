@@ -198,12 +198,18 @@ class MlpExtractor(nn.Module):
         # Iterate through the policy layers and build the policy net
         for curr_layer_dim in pi_layers_dims:
             policy_net.append(nn.Linear(last_layer_dim_pi, curr_layer_dim))
-            policy_net.append(activation_fn())
+            if activation_fn == nn.LeakyReLU:
+                policy_net.append(activation_fn(negative_slope=0.2))
+            else:
+                policy_net.append(activation_fn())
             last_layer_dim_pi = curr_layer_dim
         # Iterate through the value layers and build the value net
         for curr_layer_dim in vf_layers_dims:
             value_net.append(nn.Linear(last_layer_dim_vf, curr_layer_dim))
-            value_net.append(activation_fn())
+            if activation_fn == nn.LeakyReLU:
+                value_net.append(activation_fn(negative_slope=0.2))
+            else:
+                value_net.append(activation_fn())
             last_layer_dim_vf = curr_layer_dim
 
         # Save dim, used to create the distributions

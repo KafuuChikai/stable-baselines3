@@ -144,6 +144,7 @@ class OnPolicyAlgorithm(BaseAlgorithm):
                         self.policy_kwargs["share_observation_space"] = self.share_observation_space
                 else:
                     self.rollout_buffer_class = RolloutBuffer
+                    self.rollout_buffer_kwargs["value_normalizer"] = self.value_normalizer
 
         self.rollout_buffer = self.rollout_buffer_class(
             self.n_steps,
@@ -294,7 +295,10 @@ class OnPolicyAlgorithm(BaseAlgorithm):
                     else:
                         terminal_obs = self.policy.obs_to_tensor(infos[idx]["terminal_observation"])[0]
                         with th.no_grad():
-                            terminal_value = self.policy.predict_values(terminal_obs)[0]  # type: ignore[arg-type]
+                            if self.use_valuenorm:
+                                terminal_value = self.value_normalizer.denormalize(self.policy.predict_values(terminal_obs)[0].cpu()).flatten()  # type: ignore[arg-type]
+                            else:
+                                terminal_value = self.policy.predict_values(terminal_obs)[0]  # type: ignore[arg-type]
                         rewards[idx] += self.gamma * terminal_value
 
             if self.use_active_masks:
@@ -377,7 +381,8 @@ class OnPolicyAlgorithm(BaseAlgorithm):
                 values = self.policy.predict_values(obs_as_tensor(new_obs, self.device))  # type: ignore[arg-type]
             rollout_buffer.compute_returns_and_advantage(last_values=values, dones=dones)
 
-        self.value_normalizer.update(rollout_buffer.returns.flatten())
+        if self.use_valuenorm:
+            self.value_normalizer.update(rollout_buffer.values.flatten())
 
         callback.update_locals(locals())
 

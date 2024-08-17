@@ -274,7 +274,10 @@ class PPO(OnPolicyAlgorithm):
                     else:
                         value_loss = F.mse_loss(rollout_data.returns[rollout_data.active_masks], values_pred[rollout_data.active_masks])
                 else:
-                    value_loss = F.mse_loss(rollout_data.returns, values_pred)
+                    if self.use_valuenorm:
+                        value_loss = F.mse_loss(self.rollout_buffer.value_normalizer.normalize(rollout_data.returns).flatten(), values_pred)
+                    else:
+                        value_loss = F.mse_loss(rollout_data.returns, values_pred)
                 value_losses.append(value_loss.item())
 
                 # Entropy loss favor exploration
@@ -327,7 +330,11 @@ class PPO(OnPolicyAlgorithm):
             else:
                 explained_var = explained_variance(self.rollout_buffer.values[self.rollout_buffer.active_masks].flatten(), self.rollout_buffer.returns[self.rollout_buffer.active_masks].flatten())
         else:
-            explained_var = explained_variance(self.rollout_buffer.values.flatten(), self.rollout_buffer.returns.flatten())
+            if self.use_valuenorm:
+                explained_var = explained_variance(self.rollout_buffer.value_normalizer.denormalize(self.rollout_buffer.values).flatten(),
+                                                   self.rollout_buffer.returns.flatten())
+            else:
+                explained_var = explained_variance(self.rollout_buffer.values.flatten(), self.rollout_buffer.returns.flatten())
 
         # Logs
         self.logger.record("train/entropy_loss", np.mean(entropy_losses))
