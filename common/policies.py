@@ -809,7 +809,8 @@ class ActorCriticPolicy(BasePolicy):
             else:
                 # Actions could be on arbitrary scale, so clip the actions to avoid
                 # out of bound error (e.g. if sampling from a Gaussian distribution)
-                actions = np.tanh(actions)  # type: ignore[assignment, arg-type]
+                # actions = np.tanh(actions)  # type: ignore[assignment, arg-type]
+                actions = np.clip(actions, self.action_space.low, self.action_space.high)  # type: ignore[assignment, arg-type]
 
         # Remove batch dimension if needed
         if not vectorized_env:
@@ -1277,7 +1278,8 @@ class ActorCriticSharePolicy(BasePolicy):
             else:
                 # Actions could be on arbitrary scale, so clip the actions to avoid
                 # out of bound error (e.g. if sampling from a Gaussian distribution)
-                actions = np.tanh(actions)  # type: ignore[assignment, arg-type]
+                # actions = np.tanh(actions)  # type: ignore[assignment, arg-type]
+                actions = np.clip(actions, self.action_space.low, self.action_space.high)  # type: ignore[assignment, arg-type]
 
         # Remove batch dimension if needed
         if not vectorized_env:
