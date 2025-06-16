@@ -12,9 +12,14 @@ from stable_baselines3.common.type_aliases import (
     DictRolloutBufferSamples,
     ReplayBufferSamples,
     RolloutBufferSamples,
+    ShareRolloutBufferSamples,
+    MasksRolloutBufferSamples,
+    MasksShareRolloutBufferSamples,
 )
 from stable_baselines3.common.utils import get_device
 from stable_baselines3.common.vec_env import VecNormalize
+
+from stable_baselines3.common.valuenorm import ValueNorm
 
 try:
     # Check memory used by replay buffer when possible
@@ -116,7 +121,7 @@ class BaseBuffer(ABC):
     @abstractmethod
     def _get_samples(
         self, batch_inds: np.ndarray, env: Optional[VecNormalize] = None
-    ) -> Union[ReplayBufferSamples, RolloutBufferSamples]:
+    ) -> Union[ReplayBufferSamples, RolloutBufferSamples, ShareRolloutBufferSamples]:
         """
         :param batch_inds:
         :param env:
@@ -380,11 +385,13 @@ class RolloutBuffer(BaseBuffer):
         gae_lambda: float = 1,
         gamma: float = 0.99,
         n_envs: int = 1,
+        value_normalizer: Optional[ValueNorm] = None,
     ):
         super().__init__(buffer_size, observation_space, action_space, device, n_envs=n_envs)
         self.gae_lambda = gae_lambda
         self.gamma = gamma
         self.generator_ready = False
+        self.value_normalizer = value_normalizer
         self.reset()
 
     def reset(self) -> None:
@@ -399,7 +406,7 @@ class RolloutBuffer(BaseBuffer):
         self.generator_ready = False
         super().reset()
 
-    def compute_returns_and_advantage(self, last_values: th.Tensor, dones: np.ndarray) -> None:
+    def compute_returns_and_advantage(self, last_values: th.Tensor, dones: np.ndarray, num_agent: int = 1, agent_id: int = 0) -> None:
         """
         Post-processing step: compute the lambda-return (TD(lambda) estimate)
         and GAE(lambda) advantage.
@@ -418,23 +425,45 @@ class RolloutBuffer(BaseBuffer):
         :param last_values: state value estimation for the last step (one for each env)
         :param dones: if the last step was a terminal step (one bool for each env).
         """
+        # when use default num_agent = 1 and agent_id = 0, this function works the same as RolloutBuffer
         # Convert to numpy
-        last_values = last_values.clone().cpu().numpy().flatten()
+        # if self.use_valuenorm:
+        if self.value_normalizer is not None:
+            # print(self.value_normalizer.running_mean, self.value_normalizer.running_mean_sq)
+            denormalize_last_values = self.value_normalizer.denormalize(last_values.clone().cpu().numpy().flatten())
+            denormalize_values = self.value_normalizer.denormalize(self.values)
 
-        last_gae_lam = 0
-        for step in reversed(range(self.buffer_size)):
-            if step == self.buffer_size - 1:
-                next_non_terminal = 1.0 - dones
-                next_values = last_values
-            else:
-                next_non_terminal = 1.0 - self.episode_starts[step + 1]
-                next_values = self.values[step + 1]
-            delta = self.rewards[step] + self.gamma * next_values * next_non_terminal - self.values[step]
-            last_gae_lam = delta + self.gamma * self.gae_lambda * next_non_terminal * last_gae_lam
-            self.advantages[step] = last_gae_lam
-        # TD(lambda) estimator, see Github PR #375 or "Telescoping in TD(lambda)"
-        # in David Silver Lecture 4: https://www.youtube.com/watch?v=PnHCvfgC_ZA
-        self.returns = self.advantages + self.values
+            last_gae_lam = 0
+            for step in reversed(range(agent_id, self.buffer_size, num_agent)):
+                if step == self.buffer_size - 1 - (num_agent - 1 - agent_id):
+                    next_non_terminal = 1.0 - dones
+                    next_values = denormalize_last_values
+                else:
+                    next_non_terminal = 1.0 - self.episode_starts[step + num_agent]
+                    next_values = denormalize_values[step + num_agent]
+                delta = self.rewards[step] + self.gamma * next_values * next_non_terminal - denormalize_values[step]
+                last_gae_lam = delta + self.gamma * self.gae_lambda * next_non_terminal * last_gae_lam
+                self.advantages[step] = last_gae_lam
+                # TD(lambda) estimator, see Github PR #375 or "Telescoping in TD(lambda)"
+                # in David Silver Lecture 4: https://www.youtube.com/watch?v=PnHCvfgC_ZA
+                self.returns[step] = self.advantages[step] + denormalize_values[step]
+        else:
+            last_values = last_values.clone().cpu().numpy().flatten()
+            
+            last_gae_lam = 0
+            for step in reversed(range(agent_id, self.buffer_size, num_agent)):
+                if step == self.buffer_size - 1 - (num_agent - 1 - agent_id):
+                    next_non_terminal = 1.0 - dones
+                    next_values = last_values
+                else:
+                    next_non_terminal = 1.0 - self.episode_starts[step + num_agent]
+                    next_values = self.values[step + num_agent]
+                delta = self.rewards[step] + self.gamma * next_values * next_non_terminal - self.values[step]
+                last_gae_lam = delta + self.gamma * self.gae_lambda * next_non_terminal * last_gae_lam
+                self.advantages[step] = last_gae_lam
+                # TD(lambda) estimator, see Github PR #375 or "Telescoping in TD(lambda)"
+                # in David Silver Lecture 4: https://www.youtube.com/watch?v=PnHCvfgC_ZA
+                self.returns[step] = self.advantages[step] + self.values[step]
 
     def add(
         self,
@@ -518,6 +547,328 @@ class RolloutBuffer(BaseBuffer):
             self.returns[batch_inds].flatten(),
         )
         return RolloutBufferSamples(*tuple(map(self.to_torch, data)))
+
+
+class RolloutShareBuffer(BaseBuffer):
+    """
+    Rollout buffer used in on-policy algorithms like A2C/PPO.
+    It corresponds to ``buffer_size`` transitions collected
+    using the current policy.
+    This experience will be discarded after the policy update.
+    In order to use PPO objective, we also store the current value of each state
+    and the log probability of each taken action.
+
+    The term rollout here refers to the model-free notion and should not
+    be used with the concept of rollout used in model-based RL or planning.
+    Hence, it is only involved in policy and value function training but not action selection.
+
+    :param buffer_size: Max number of element in the buffer
+    :param observation_space: Observation space
+    :param share_observation_space: Share Observation space
+    :param action_space: Action space
+    :param device: PyTorch device
+    :param gae_lambda: Factor for trade-off of bias vs variance for Generalized Advantage Estimator
+        Equivalent to classic advantage when set to 1.
+    :param gamma: Discount factor
+    :param n_envs: Number of parallel environments
+    :param n_agent: Number of agents
+    :param use_share_obs: Whether to use share observation or not
+    :param use_active_masks: Whether to use active masks or not
+    """
+
+    share_observation_space: Optional[spaces.Space]
+    share_obs_shape: Optional[Tuple[int, ...]]
+    observations: np.ndarray
+    actions: np.ndarray
+    rewards: np.ndarray
+    advantages: np.ndarray
+    returns: np.ndarray
+    episode_starts: np.ndarray
+    log_probs: np.ndarray
+    values: np.ndarray
+    share_observations: Optional[np.ndarray]
+    active_masks: Optional[np.ndarray]
+
+    def __init__(
+        self,
+        buffer_size: int,
+        observation_space: spaces.Space,
+        action_space: spaces.Space,
+        share_observation_space: Optional[spaces.Space] = None,
+        device: Union[th.device, str] = "auto",
+        gae_lambda: float = 1,
+        gamma: float = 0.99,
+        n_envs: int = 1,
+        n_agent: int = 1,
+        use_share_obs: bool = False,
+        use_active_masks: bool = False,
+        # use_valuenorm: bool = False,
+        value_normalizer: Optional[ValueNorm] = None,
+    ):
+        super().__init__(buffer_size, observation_space, action_space, device, n_envs=n_envs)
+        self.gae_lambda = gae_lambda
+        self.gamma = gamma
+        self.generator_ready = False
+        self.n_agent = n_agent
+        if share_observation_space is None and use_share_obs:
+            raise ValueError("share_observations_space must be provided when use_share_obs is True")
+        self.share_observation_space = share_observation_space
+        self.use_share_obs = use_share_obs
+        self.use_active_masks = use_active_masks
+        if self.use_share_obs:
+            self.share_obs_shape = get_obs_shape(share_observation_space)
+        self.value_normalizer = value_normalizer
+        self.reset()
+
+    def reset(self) -> None:
+        self.observations = np.zeros((self.buffer_size, self.n_envs, *self.obs_shape), dtype=np.float32)
+        self.actions = np.zeros((self.buffer_size, self.n_envs, self.action_dim), dtype=np.float32)
+        self.rewards = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
+        self.returns = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
+        self.episode_starts = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
+        self.values = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
+        self.log_probs = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
+        self.advantages = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
+        self.generator_ready = False
+        if self.use_share_obs:
+            self.share_observations = np.zeros((self.buffer_size, self.n_envs, *self.share_obs_shape), dtype=np.float32)
+        else:
+            self.share_observations = None
+        if self.use_active_masks:
+            self.active_masks = np.zeros((self.buffer_size, self.n_envs), dtype=bool)
+        else:
+            self.active_masks = None
+        super().reset()
+
+    def compute_returns_and_advantage(self, last_values: th.Tensor, dones: np.ndarray, num_agent: int = 1, agent_id: int = 0) -> None:
+        """
+        Post-processing step: compute the lambda-return (TD(lambda) estimate)
+        and GAE(lambda) advantage.
+
+        Uses Generalized Advantage Estimation (https://arxiv.org/abs/1506.02438)
+        to compute the advantage. To obtain Monte-Carlo advantage estimate (A(s) = R - V(S))
+        where R is the sum of discounted reward with value bootstrap
+        (because we don't always have full episode), set ``gae_lambda=1.0`` during initialization.
+
+        The TD(lambda) estimator has also two special cases:
+        - TD(1) is Monte-Carlo estimate (sum of discounted rewards)
+        - TD(0) is one-step estimate with bootstrapping (r_t + gamma * v(s_{t+1}))
+
+        For more information, see discussion in https://github.com/DLR-RM/stable-baselines3/pull/375.
+
+        :param last_values: state value estimation for the last step (one for each env)
+        :param dones: if the last step was a terminal step (one bool for each env).
+        :param num_agent: number of agents, compute returns and advantages for each agent with different starting index
+        """
+        # when use default num_agent = 1 and agent_id = 0, this function works the same as RolloutBuffer
+        # Convert to numpy
+        # if self.use_valuenorm:
+        if self.value_normalizer is not None:
+            # print(self.value_normalizer.running_mean, self.value_normalizer.running_mean_sq)
+            denormalize_last_values = self.value_normalizer.denormalize(last_values.clone().cpu().numpy().flatten())
+            denormalize_values = self.value_normalizer.denormalize(self.values)
+
+            last_gae_lam = 0
+            for step in reversed(range(agent_id, self.buffer_size, num_agent)):
+                if step == self.buffer_size - 1 - (num_agent - 1 - agent_id):
+                    next_non_terminal = 1.0 - dones
+                    next_values = denormalize_last_values
+                else:
+                    next_non_terminal = 1.0 - self.episode_starts[step + num_agent]
+                    next_values = denormalize_values[step + num_agent]
+                delta = self.rewards[step] + self.gamma * next_values * next_non_terminal - denormalize_values[step]
+                last_gae_lam = delta + self.gamma * self.gae_lambda * next_non_terminal * last_gae_lam
+                self.advantages[step] = last_gae_lam
+                # TD(lambda) estimator, see Github PR #375 or "Telescoping in TD(lambda)"
+                # in David Silver Lecture 4: https://www.youtube.com/watch?v=PnHCvfgC_ZA
+                self.returns[step] = self.advantages[step] + denormalize_values[step]
+        else:
+            last_values = last_values.clone().cpu().numpy().flatten()
+            
+            last_gae_lam = 0
+            for step in reversed(range(agent_id, self.buffer_size, num_agent)):
+                if step == self.buffer_size - 1 - (num_agent - 1 - agent_id):
+                    next_non_terminal = 1.0 - dones
+                    next_values = last_values
+                else:
+                    next_non_terminal = 1.0 - self.episode_starts[step + num_agent]
+                    next_values = self.values[step + num_agent]
+                delta = self.rewards[step] + self.gamma * next_values * next_non_terminal - self.values[step]
+                last_gae_lam = delta + self.gamma * self.gae_lambda * next_non_terminal * last_gae_lam
+                self.advantages[step] = last_gae_lam
+                # TD(lambda) estimator, see Github PR #375 or "Telescoping in TD(lambda)"
+                # in David Silver Lecture 4: https://www.youtube.com/watch?v=PnHCvfgC_ZA
+                self.returns[step] = self.advantages[step] + self.values[step]
+
+    def add(
+        self,
+        obs: np.ndarray,
+        action: np.ndarray,
+        reward: np.ndarray,
+        episode_start: np.ndarray,
+        value: th.Tensor,
+        log_prob: th.Tensor,
+        share_obs: Optional[np.ndarray] = None,
+        active_masks: Optional[np.ndarray] = None,
+    ) -> None:
+        """
+        :param obs: Observation
+        :param action: Action
+        :param reward:
+        :param episode_start: Start of episode signal.
+        :param value: estimated value of the current state
+            following the current policy.
+        :param log_prob: log probability of the action
+            following the current policy.
+        """
+        if len(log_prob.shape) == 0:
+            # Reshape 0-d tensor to avoid error
+            log_prob = log_prob.reshape(-1, 1)
+
+        # Reshape needed when using multiple envs with discrete observations
+        # as numpy cannot broadcast (n_discrete,) to (n_discrete, 1)
+        if isinstance(self.observation_space, spaces.Discrete):
+            obs = obs.reshape((self.n_envs, *self.obs_shape))
+
+        # Reshape to handle multi-dim and discrete action spaces, see GH #970 #1392
+        action = action.reshape((self.n_envs, self.action_dim))
+
+        self.observations[self.pos] = np.array(obs)
+        self.actions[self.pos] = np.array(action)
+        self.rewards[self.pos] = np.array(reward)
+        self.episode_starts[self.pos] = np.array(episode_start)
+        self.values[self.pos] = value.clone().cpu().numpy().flatten()
+        self.log_probs[self.pos] = log_prob.clone().cpu().numpy()
+        if self.use_share_obs:
+            assert share_obs is not None, "share_obs should not be None when use_share_obs is True"
+            self.share_observations[self.pos] = np.array(share_obs)
+        if self.use_active_masks:
+            assert active_masks is not None, "active_masks should not be None when use_active_masks is True"
+            self.active_masks[self.pos] = np.array(active_masks)
+        self.pos += 1
+        if self.pos == self.buffer_size:
+            self.full = True
+
+    def get(self, batch_size: Optional[int] = None) -> Union[Generator[RolloutBufferSamples, None, None],
+                                                             Generator[ShareRolloutBufferSamples, None, None],
+                                                             Generator[MasksRolloutBufferSamples, None, None],
+                                                             Generator[MasksShareRolloutBufferSamples, None, None],
+                                                            ]:
+        assert self.full, ""
+        indices = np.random.permutation(self.buffer_size * self.n_envs)
+        # Prepare the data
+        if not self.generator_ready:
+            # Data type for RolloutBufferSamples
+            if not self.use_share_obs and not self.use_active_masks:
+                _tensor_names = [
+                    "observations",
+                    "actions",
+                    "values",
+                    "log_probs",
+                    "advantages",
+                    "returns",
+                ]
+            # Data type for ShareRolloutBufferSamples
+            elif self.use_share_obs and not self.use_active_masks:
+                _tensor_names = [
+                    "observations",
+                    "actions",
+                    "values",
+                    "log_probs",
+                    "advantages",
+                    "returns",
+                    "share_observations",
+                ]
+            # Data type for MasksRolloutBufferSamples
+            elif not self.use_share_obs and self.use_active_masks:
+                _tensor_names = [
+                    "observations",
+                    "actions",
+                    "values",
+                    "log_probs",
+                    "advantages",
+                    "returns",
+                    "active_masks",
+                ]
+            # Data type for MasksShareRolloutBufferSamples
+            elif self.use_share_obs and self.use_active_masks:
+                _tensor_names = [
+                    "observations",
+                    "actions",
+                    "values",
+                    "log_probs",
+                    "advantages",
+                    "returns",
+                    "share_observations",
+                    "active_masks",
+                ]
+
+            for tensor in _tensor_names:
+                self.__dict__[tensor] = self.swap_and_flatten(self.__dict__[tensor])
+            self.generator_ready = True
+
+        # Return everything, don't create minibatches
+        if batch_size is None:
+            batch_size = self.buffer_size * self.n_envs
+
+        start_idx = 0
+        while start_idx < self.buffer_size * self.n_envs:
+            yield self._get_samples(indices[start_idx : start_idx + batch_size])
+            start_idx += batch_size
+
+    def _get_samples(
+        self,
+        batch_inds: np.ndarray,
+        env: Optional[VecNormalize] = None,
+    ) -> Union[RolloutBufferSamples, ShareRolloutBufferSamples, MasksRolloutBufferSamples, MasksShareRolloutBufferSamples]:
+        # return data type for RolloutBufferSamples
+        if not self.use_share_obs and not self.use_active_masks:
+            data = (
+                self.observations[batch_inds],
+                self.actions[batch_inds],
+                self.values[batch_inds].flatten(),
+                self.log_probs[batch_inds].flatten(),
+                self.advantages[batch_inds].flatten(),
+                self.returns[batch_inds].flatten(),
+            )
+            return RolloutBufferSamples(*tuple(map(self.to_torch, data)))
+        # return data type for ShareRolloutBufferSamples
+        elif self.use_share_obs and not self.use_active_masks:
+            data = (
+                self.observations[batch_inds],
+                self.actions[batch_inds],
+                self.values[batch_inds].flatten(),
+                self.log_probs[batch_inds].flatten(),
+                self.advantages[batch_inds].flatten(),
+                self.returns[batch_inds].flatten(),
+                self.share_observations[batch_inds],
+            )
+            return ShareRolloutBufferSamples(*tuple(map(self.to_torch, data)))
+        # return data type for MasksRolloutBufferSamples
+        elif not self.use_share_obs and self.use_active_masks:
+            data = (
+                self.observations[batch_inds],
+                self.actions[batch_inds],
+                self.values[batch_inds].flatten(),
+                self.log_probs[batch_inds].flatten(),
+                self.advantages[batch_inds].flatten(),
+                self.returns[batch_inds].flatten(),
+                self.active_masks[batch_inds].flatten(),
+            )
+            return MasksRolloutBufferSamples(*tuple(map(self.to_torch, data)))
+        # return data type for MasksShareRolloutBufferSamples
+        elif self.use_share_obs and self.use_active_masks:
+            data = (
+                self.observations[batch_inds],
+                self.actions[batch_inds],
+                self.values[batch_inds].flatten(),
+                self.log_probs[batch_inds].flatten(),
+                self.advantages[batch_inds].flatten(),
+                self.returns[batch_inds].flatten(),
+                self.share_observations[batch_inds],
+                self.active_masks[batch_inds].flatten(),
+            )
+            return MasksShareRolloutBufferSamples(*tuple(map(self.to_torch, data)))
 
 
 class DictReplayBuffer(ReplayBuffer):

@@ -6,6 +6,7 @@ import os
 import time
 from glob import glob
 from typing import Any, Dict, List, Optional, SupportsFloat, Tuple, Union
+import numpy as np
 
 import gymnasium as gym
 import pandas
@@ -36,6 +37,7 @@ class Monitor(gym.Wrapper[ObsType, ActType, ObsType, ActType]):
         reset_keywords: Tuple[str, ...] = (),
         info_keywords: Tuple[str, ...] = (),
         override_existing: bool = True,
+        use_share_obs_env: bool = False,
     ):
         super().__init__(env=env)
         self.t_start = time.time()
@@ -52,6 +54,7 @@ class Monitor(gym.Wrapper[ObsType, ActType, ObsType, ActType]):
         self.reset_keywords = reset_keywords
         self.info_keywords = info_keywords
         self.allow_early_resets = allow_early_resets
+        self.use_share_obs_env = use_share_obs_env
         self.rewards: List[float] = []
         self.needs_reset = True
         self.episode_returns: List[float] = []
@@ -61,7 +64,7 @@ class Monitor(gym.Wrapper[ObsType, ActType, ObsType, ActType]):
         # extra info about the current episode, that was passed in during reset()
         self.current_reset_info: Dict[str, Any] = {}
 
-    def reset(self, **kwargs) -> Tuple[ObsType, Dict[str, Any]]:
+    def reset(self, **kwargs) -> Union[Tuple[ObsType, Dict[str, Any]], Tuple[ObsType, ObsType, Dict[str, Any]]]:
         """
         Calls the Gym environment reset. Can only be called if the environment is over, or if allow_early_resets is True
 
@@ -82,7 +85,8 @@ class Monitor(gym.Wrapper[ObsType, ActType, ObsType, ActType]):
             self.current_reset_info[key] = value
         return self.env.reset(**kwargs)
 
-    def step(self, action: ActType) -> Tuple[ObsType, SupportsFloat, bool, bool, Dict[str, Any]]:
+    def step(self, action: ActType) -> Union[Tuple[ObsType, SupportsFloat, bool, bool, Dict[str, Any]],
+                                             Tuple[ObsType, ObsType, SupportsFloat, bool, bool, Dict[str, Any]]]:
         """
         Step the environment with the given action
 
@@ -91,8 +95,15 @@ class Monitor(gym.Wrapper[ObsType, ActType, ObsType, ActType]):
         """
         if self.needs_reset:
             raise RuntimeError("Tried to step environment that needs reset")
-        observation, reward, terminated, truncated, info = self.env.step(action)
-        self.rewards.append(float(reward))
+        if self.use_share_obs_env:
+            observation, share_observation, reward, terminated, truncated, info = self.env.step(action)
+        else:
+            observation, reward, terminated, truncated, info = self.env.step(action)
+        # self.rewards.append(float(reward))
+        if isinstance(reward, np.ndarray):
+            self.rewards.append(float(reward[0]))
+        else:
+            self.rewards.append(float(reward))
         if terminated or truncated:
             self.needs_reset = True
             ep_rew = sum(self.rewards)
@@ -108,7 +119,10 @@ class Monitor(gym.Wrapper[ObsType, ActType, ObsType, ActType]):
                 self.results_writer.write_row(ep_info)
             info["episode"] = ep_info
         self.total_steps += 1
-        return observation, reward, terminated, truncated, info
+        if self.use_share_obs_env:
+            return observation, share_observation, reward, terminated, truncated, info
+        else:
+            return observation, reward, terminated, truncated, info
 
     def close(self) -> None:
         """
