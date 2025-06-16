@@ -7,7 +7,7 @@ import torch as th
 from gymnasium import spaces
 
 from stable_baselines3.common.base_class import BaseAlgorithm
-from stable_baselines3.common.buffers import DictRolloutBuffer, RolloutBuffer, RolloutShareBuffer
+from stable_baselines3.common.buffers import DictRolloutBuffer, RolloutBuffer
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.policies import ActorCriticPolicy
 from stable_baselines3.common.type_aliases import GymEnv, MaybeCallback, Schedule
@@ -16,7 +16,6 @@ from stable_baselines3.common.vec_env import VecEnv
 
 SelfOnPolicyAlgorithm = TypeVar("SelfOnPolicyAlgorithm", bound="OnPolicyAlgorithm")
 
-from stable_baselines3.common.valuenorm import ValueNorm
 
 class OnPolicyAlgorithm(BaseAlgorithm):
     """
@@ -55,7 +54,7 @@ class OnPolicyAlgorithm(BaseAlgorithm):
     :param supported_action_spaces: The action spaces supported by the algorithm.
     """
 
-    rollout_buffer: Union[RolloutBuffer, RolloutShareBuffer]
+    rollout_buffer: RolloutBuffer
     policy: ActorCriticPolicy
 
     def __init__(
@@ -82,11 +81,6 @@ class OnPolicyAlgorithm(BaseAlgorithm):
         device: Union[th.device, str] = "auto",
         _init_setup_model: bool = True,
         supported_action_spaces: Optional[Tuple[Type[spaces.Space], ...]] = None,
-        num_agent: int = 1,
-        use_share_obs: bool = False,
-        use_active_masks: bool = False,
-        use_share_obs_env: bool = False,
-        use_valuenorm: bool = False,
     ):
         super().__init__(
             policy=policy,
@@ -102,12 +96,9 @@ class OnPolicyAlgorithm(BaseAlgorithm):
             stats_window_size=stats_window_size,
             tensorboard_log=tensorboard_log,
             supported_action_spaces=supported_action_spaces,
-            use_share_obs=use_share_obs,
-            use_share_obs_env=use_share_obs_env,
         )
 
-        self.num_agent = num_agent
-        self.n_steps = n_steps * self.num_agent
+        self.n_steps = n_steps
         self.gamma = gamma
         self.gae_lambda = gae_lambda
         self.ent_coef = ent_coef
@@ -115,12 +106,6 @@ class OnPolicyAlgorithm(BaseAlgorithm):
         self.max_grad_norm = max_grad_norm
         self.rollout_buffer_class = rollout_buffer_class
         self.rollout_buffer_kwargs = rollout_buffer_kwargs or {}
-        self.use_active_masks = use_active_masks
-        self.use_valuenorm = use_valuenorm
-        if self.use_valuenorm:
-            self.value_normalizer = ValueNorm(1, device = self.device)
-        else:
-            self.value_normalizer = None
 
         if _init_setup_model:
             self._setup_model()
@@ -133,18 +118,7 @@ class OnPolicyAlgorithm(BaseAlgorithm):
             if isinstance(self.observation_space, spaces.Dict):
                 self.rollout_buffer_class = DictRolloutBuffer
             else:
-                if self.num_agent > 1:
-                    self.rollout_buffer_class = RolloutShareBuffer
-                    self.rollout_buffer_kwargs["n_agent"] = self.num_agent
-                    self.rollout_buffer_kwargs["use_share_obs"] = self.use_share_obs
-                    self.rollout_buffer_kwargs["use_active_masks"] = self.use_active_masks
-                    self.rollout_buffer_kwargs["value_normalizer"] = self.value_normalizer
-                    if self.use_share_obs:
-                        self.rollout_buffer_kwargs["share_observation_space"] = self.share_observation_space
-                        self.policy_kwargs["share_observation_space"] = self.share_observation_space
-                else:
-                    self.rollout_buffer_class = RolloutBuffer
-                    self.rollout_buffer_kwargs["value_normalizer"] = self.value_normalizer
+                self.rollout_buffer_class = RolloutBuffer
 
         self.rollout_buffer = self.rollout_buffer_class(
             self.n_steps,
@@ -157,11 +131,7 @@ class OnPolicyAlgorithm(BaseAlgorithm):
             **self.rollout_buffer_kwargs,
         )
         self.policy = self.policy_class(  # type: ignore[assignment]
-            observation_space = self.observation_space,
-            action_space = self.action_space,
-            lr_schedule = self.lr_schedule,
-            use_sde = self.use_sde,
-            **self.policy_kwargs
+            self.observation_space, self.action_space, self.lr_schedule, use_sde=self.use_sde, **self.policy_kwargs
         )
         self.policy = self.policy.to(self.device)
 
@@ -169,7 +139,7 @@ class OnPolicyAlgorithm(BaseAlgorithm):
         self,
         env: VecEnv,
         callback: BaseCallback,
-        rollout_buffer: Union[RolloutBuffer, RolloutShareBuffer],
+        rollout_buffer: RolloutBuffer,
         n_rollout_steps: int,
     ) -> bool:
         """
@@ -186,8 +156,6 @@ class OnPolicyAlgorithm(BaseAlgorithm):
             collected, False if callback terminated rollout prematurely.
         """
         assert self._last_obs is not None, "No previous observation was provided"
-        if self.use_share_obs:
-            assert self._last_share_obs is not None, "No previous share observation was provided"
         # Switch to eval mode (this affects batch norm / dropout)
         self.policy.set_training_mode(False)
 
@@ -206,53 +174,24 @@ class OnPolicyAlgorithm(BaseAlgorithm):
 
             with th.no_grad():
                 # Convert to pytorch tensor or to TensorDict
-                if self.num_agent > 1:
-                    obs_tensor = [obs_as_tensor(self._last_obs[:, i, :], self.device) for i in range(self.num_agent)]
-                    actions, values, log_probs = [], [], []
-                    if self.use_share_obs:
-                        share_obs_tensor = [obs_as_tensor(self._last_share_obs[:, i, :], self.device) for i in range(self.num_agent)]
-                        for i in range(self.num_agent):
-                            actions_i, values_i, log_probs_i = self.policy(obs_tensor[i], share_obs_tensor[i])
-                            actions.append(actions_i)
-                            values.append(values_i)
-                            log_probs.append(log_probs_i)
-                    else:
-                        for i in range(self.num_agent):
-                            actions_i, values_i, log_probs_i = self.policy(obs_tensor[i])
-                            actions.append(actions_i)
-                            values.append(values_i)
-                            log_probs.append(log_probs_i)
-                else:
-                    obs_tensor = obs_as_tensor(self._last_obs, self.device)
-                    actions, values, log_probs = self.policy(obs_tensor)
-            if self.num_agent > 1:
-                actions = th.stack(actions).cpu().numpy()
-                values = th.stack(values)
-                log_probs = th.stack(log_probs)
-            else:
-                actions = actions.cpu().numpy()
+                obs_tensor = obs_as_tensor(self._last_obs, self.device)
+                actions, values, log_probs = self.policy(obs_tensor)
+            actions = actions.cpu().numpy()
 
             # Rescale and perform action
             clipped_actions = actions
 
-            if self.num_agent > 1:
-                clipped_actions = np.array([np.clip(actions[i], self.action_space.low, self.action_space.high) for i in range(self.num_agent)])
-                clipped_actions = clipped_actions.swapaxes(0, 1)
-            else:
-                if isinstance(self.action_space, spaces.Box):
-                    if self.policy.squash_output:
-                        # Unscale the actions to match env bounds
-                        # if they were previously squashed (scaled in [-1, 1])
-                        clipped_actions = self.policy.unscale_action(clipped_actions)
-                    else:
-                        # Otherwise, clip the actions to avoid out of bound error
-                        # as we are sampling from an unbounded Gaussian distribution
-                        clipped_actions = np.clip(actions, self.action_space.low, self.action_space.high)
+            if isinstance(self.action_space, spaces.Box):
+                if self.policy.squash_output:
+                    # Unscale the actions to match env bounds
+                    # if they were previously squashed (scaled in [-1, 1])
+                    clipped_actions = self.policy.unscale_action(clipped_actions)
+                else:
+                    # Otherwise, clip the actions to avoid out of bound error
+                    # as we are sampling from an unbounded Gaussian distribution
+                    clipped_actions = np.clip(actions, self.action_space.low, self.action_space.high)
 
-            if self.use_share_obs_env:
-                new_obs, new_share_obs, rewards, dones, infos = env.step(clipped_actions)
-            else:
-                new_obs, rewards, dones, infos = env.step(clipped_actions)
+            new_obs, rewards, dones, infos = env.step(clipped_actions)
 
             self.num_timesteps += env.num_envs
 
@@ -262,7 +201,7 @@ class OnPolicyAlgorithm(BaseAlgorithm):
                 return False
 
             self._update_info_buffer(infos)
-            n_steps += self.num_agent
+            n_steps += 1
 
             if isinstance(self.action_space, spaces.Discrete):
                 # Reshape in case of discrete action
@@ -276,113 +215,27 @@ class OnPolicyAlgorithm(BaseAlgorithm):
                     and infos[idx].get("terminal_observation") is not None
                     and infos[idx].get("TimeLimit.truncated", False)
                 ):
-                    if self.num_agent > 1:
-                        if self.use_share_obs:
-                            terminal_share_obs = [self.policy.obs_to_tensor(infos[idx]["terminal_share_observation"][i], share_obs=True)[0] for i in range(self.num_agent)]
-                            with th.no_grad():
-                                if self.use_valuenorm:
-                                    terminal_value = np.hstack([self.value_normalizer.denormalize(self.policy.predict_values(terminal_share_obs[i])[0].cpu()).flatten() for i in range(self.num_agent)])
-                                else:
-                                    terminal_value = np.hstack([self.policy.predict_values(terminal_share_obs[i])[0].cpu() for i in range(self.num_agent)])
-                        else:
-                            terminal_obs = [self.policy.obs_to_tensor(infos[idx]["terminal_observation"][i])[0] for i in range(self.num_agent)]
-                            with th.no_grad():
-                                if self.use_valuenorm:
-                                    terminal_value = np.hstack([self.value_normalizer.denormalize(self.policy.predict_values(terminal_obs[i])[0].cpu()).flatten() for i in range(self.num_agent)])
-                                else:
-                                    terminal_value = np.hstack([self.policy.predict_values(terminal_obs[i])[0].cpu() for i in range(self.num_agent)])
-                        rewards[idx] += self.gamma * terminal_value
-                    else:
-                        terminal_obs = self.policy.obs_to_tensor(infos[idx]["terminal_observation"])[0]
-                        with th.no_grad():
-                            if self.use_valuenorm:
-                                terminal_value = self.value_normalizer.denormalize(self.policy.predict_values(terminal_obs)[0].cpu()).flatten()  # type: ignore[arg-type]
-                            else:
-                                terminal_value = self.policy.predict_values(terminal_obs)[0]  # type: ignore[arg-type]
-                        rewards[idx] += self.gamma * terminal_value
+                    terminal_obs = self.policy.obs_to_tensor(infos[idx]["terminal_observation"])[0]
+                    with th.no_grad():
+                        terminal_value = self.policy.predict_values(terminal_obs)[0]  # type: ignore[arg-type]
+                    rewards[idx] += self.gamma * terminal_value
 
-            if self.use_active_masks:
-                active_masks = np.stack([info.get("active_mask") for info in infos])
-
-            if self.num_agent > 1:
-                if not self.use_share_obs and not self.use_active_masks:
-                    for i in range(self.num_agent):
-                        rollout_buffer.add(
-                            self._last_obs[:, i, :],  # type: ignore[arg-type]
-                            actions[i, :, :],
-                            rewards[:, i],
-                            self._last_episode_starts,  # type: ignore[arg-type]
-                            values[i, :],
-                            log_probs[i, :],
-                        )
-                elif self.use_share_obs and not self.use_active_masks:
-                    for i in range(self.num_agent):
-                        rollout_buffer.add(
-                            self._last_obs[:, i, :],  # type: ignore[arg-type]
-                            actions[i, :, :],
-                            rewards[:, i],
-                            self._last_episode_starts,  # type: ignore[arg-type]
-                            values[i, :],
-                            log_probs[i, :],
-                            self._last_share_obs[:, i, :],  # type: ignore[arg-type]
-                            None,
-                        )
-                elif not self.use_share_obs and self.use_active_masks:
-                    for i in range(self.num_agent):
-                        rollout_buffer.add(
-                            self._last_obs[:, i, :],  # type: ignore[arg-type]
-                            actions[i, :, :],
-                            rewards[:, i],
-                            self._last_episode_starts,  # type: ignore[arg-type]
-                            values[i, :],
-                            log_probs[i, :],
-                            None,
-                            active_masks[:, i],
-                        )
-                elif self.use_share_obs and self.use_active_masks:
-                    for i in range(self.num_agent):
-                        rollout_buffer.add(
-                            self._last_obs[:, i, :],  # type: ignore[arg-type]
-                            actions[i, :, :],
-                            rewards[:, i],
-                            self._last_episode_starts,  # type: ignore[arg-type]
-                            values[i, :],
-                            log_probs[i, :],
-                            self._last_share_obs[:, i, :],  # type: ignore[arg-type]
-                            active_masks[:, i],
-                        )
-            else:
-                rollout_buffer.add(
-                    self._last_obs,  # type: ignore[arg-type]
-                    actions,
-                    rewards,
-                    self._last_episode_starts,  # type: ignore[arg-type]
-                    values,
-                    log_probs,
-                )
+            rollout_buffer.add(
+                self._last_obs,  # type: ignore[arg-type]
+                actions,
+                rewards,
+                self._last_episode_starts,  # type: ignore[arg-type]
+                values,
+                log_probs,
+            )
             self._last_obs = new_obs  # type: ignore[assignment]
             self._last_episode_starts = dones
-            if self.use_share_obs:
-                self._last_share_obs = new_share_obs
 
-        if self.num_agent > 1:
-            with th.no_grad():
-                if self.use_share_obs:
-                    # Compute value for the last timestep
-                    values = [self.policy.predict_values(obs_as_tensor(new_share_obs[:, i, :], self.device)) for i in range(self.num_agent)]
-                else:
-                    # Compute value for the last timestep
-                    values = [self.policy.predict_values(obs_as_tensor(new_obs[:, i, :], self.device)) for i in range(self.num_agent)]
-            for i in range(self.num_agent):
-                rollout_buffer.compute_returns_and_advantage(last_values=values[i], dones=dones, num_agent=self.num_agent, agent_id=i)
-        else:
-            with th.no_grad():
-                # Compute value for the last timestep
-                values = self.policy.predict_values(obs_as_tensor(new_obs, self.device))  # type: ignore[arg-type]
-            rollout_buffer.compute_returns_and_advantage(last_values=values, dones=dones)
+        with th.no_grad():
+            # Compute value for the last timestep
+            values = self.policy.predict_values(obs_as_tensor(new_obs, self.device))  # type: ignore[arg-type]
 
-        if self.use_valuenorm:
-            self.value_normalizer.update(rollout_buffer.values.flatten())
+        rollout_buffer.compute_returns_and_advantage(last_values=values, dones=dones)
 
         callback.update_locals(locals())
 

@@ -118,8 +118,6 @@ class BaseAlgorithm(ABC):
         use_sde: bool = False,
         sde_sample_freq: int = -1,
         supported_action_spaces: Optional[Tuple[Type[spaces.Space], ...]] = None,
-        use_share_obs: bool = False,
-        use_share_obs_env: bool = False,
     ) -> None:
         if isinstance(policy, str):
             self.policy_class = self._get_policy_from_name(policy)
@@ -144,7 +142,6 @@ class BaseAlgorithm(ABC):
         self.learning_rate = learning_rate
         self.tensorboard_log = tensorboard_log
         self._last_obs = None  # type: Optional[Union[np.ndarray, Dict[str, np.ndarray]]]
-        self._last_share_obs = None
         self._last_episode_starts = None  # type: Optional[np.ndarray]
         # When using VecNormalize:
         self._last_original_obs = None  # type: Optional[Union[np.ndarray, Dict[str, np.ndarray]]]
@@ -165,8 +162,6 @@ class BaseAlgorithm(ABC):
         self._custom_logger = False
         self.env: Optional[VecEnv] = None
         self._vec_normalize_env: Optional[VecNormalize] = None
-        self.use_share_obs = use_share_obs
-        self.use_share_obs_env = use_share_obs_env
 
         # Create and wrap the env if needed
         if env is not None:
@@ -177,13 +172,6 @@ class BaseAlgorithm(ABC):
             self.action_space = env.action_space
             self.n_envs = env.num_envs
             self.env = env
-            if self.use_share_obs_env:
-                assert hasattr(env, 'share_observation_space'), "env does not have 'share_observation_space' attribute, but 'self.use_share_obs_env' is True"
-                self.share_observation_space = env.share_observation_space
-            else:
-                # if hasattr(env, 'share_observation_space'):
-                #     warnings.warn("env has 'share_observation_space' attribute, but 'self.use_share_obs_env' is False")
-                self.share_observation_space = None
 
             # get VecNormalize object if needed
             self._vec_normalize_env = unwrap_vec_normalize(env)
@@ -202,9 +190,6 @@ class BaseAlgorithm(ABC):
             # Catch common mistake: using MlpPolicy/CnnPolicy instead of MultiInputPolicy
             if policy in ["MlpPolicy", "CnnPolicy"] and isinstance(self.observation_space, spaces.Dict):
                 raise ValueError(f"You must use `MultiInputPolicy` when working with dict observation space, not {policy}")
-            
-            if policy in ["MlpPolicy", "CnnPolicy", "MultiInputPolicy"] and self.use_share_obs:
-                raise ValueError(f"You must use `MlpSharePolicy` when working with share observation space, not {policy}")
 
             if self.use_sde and not isinstance(self.action_space, spaces.Box):
                 raise ValueError("generalized State-Dependent Exploration (gSDE) can only be used with continuous actions.")
@@ -433,12 +418,9 @@ class BaseAlgorithm(ABC):
         self._num_timesteps_at_start = self.num_timesteps
 
         # Avoid resetting the environment when calling ``.learn()`` consecutive times
-        if reset_num_timesteps or self._last_obs is None or self._last_share_obs is None:
+        if reset_num_timesteps or self._last_obs is None:
             assert self.env is not None
-            if self.use_share_obs_env:
-                self._last_obs, self._last_share_obs = self.env.reset()  # type: ignore[assignment]
-            else:
-                self._last_obs = self.env.reset()
+            self._last_obs = self.env.reset()  # type: ignore[assignment]
             self._last_episode_starts = np.ones((self.env.num_envs,), dtype=bool)
             # Retrieve unnormalized observation for saving into the buffer
             if self._vec_normalize_env is not None:
@@ -551,7 +533,6 @@ class BaseAlgorithm(ABC):
     def predict(
         self,
         observation: Union[np.ndarray, Dict[str, np.ndarray]],
-        share_observation: Optional[np.ndarray] = None,
         state: Optional[Tuple[np.ndarray, ...]] = None,
         episode_start: Optional[np.ndarray] = None,
         deterministic: bool = False,
