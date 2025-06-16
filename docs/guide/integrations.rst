@@ -70,14 +70,12 @@ Installation
 
  .. code-block:: bash
 
-
      # Download model and save it into the logs/ folder
-     # Only use TRUST_REMOTE_CODE=True with HF models that can be trusted (here the SB3 organization)
-     TRUST_REMOTE_CODE=True python -m rl_zoo3.load_from_hub --algo a2c --env LunarLander-v3 -orga sb3 -f logs/
+     python -m rl_zoo3.load_from_hub --algo a2c --env LunarLander-v2 -orga sb3 -f logs/
      # Test the agent
-     python -m rl_zoo3.enjoy --algo a2c --env LunarLander-v3  -f logs/
+     python -m rl_zoo3.enjoy --algo a2c --env LunarLander-v2  -f logs/
      # Push model, config and hyperparameters to the hub
-     python -m rl_zoo3.push_to_hub --algo a2c --env LunarLander-v3 -f logs/ -orga sb3 -m "Initial commit"
+     python -m rl_zoo3.push_to_hub --algo a2c --env LunarLander-v2 -f logs/ -orga sb3 -m "Initial commit"
 
 
 
@@ -88,18 +86,11 @@ For instance ``sb3/demo-hf-CartPole-v1``:
 
 .. code-block:: python
 
-  import os
-
   import gymnasium as gym
 
   from huggingface_sb3 import load_from_hub
   from stable_baselines3 import PPO
   from stable_baselines3.common.evaluation import evaluate_policy
-
-
-  # Allow the use of `pickle.load()` when downloading model from the hub
-  # Please make sure that the organization from which you download can be trusted
-  os.environ["TRUST_REMOTE_CODE"] = "True"
 
   # Retrieve the model from the hub
   ## repo_id = id of the model repository from the Hugging Face Hub (repo_id = {organization}/{repo_name})
@@ -175,7 +166,7 @@ With ``package_to_hub()``
   # Train the agent
   model.learn(total_timesteps=int(5000))
 
-  # This method saves, evaluates, generates a model card and records a replay video of your agent before pushing the repo to the hub
+  # This method save, evaluate, generate a model card and record a replay video of your agent before pushing the repo to the hub
   package_to_hub(model=model,
                model_name="ppo-CartPole-v1",
                model_architecture="PPO",
@@ -219,7 +210,7 @@ With ``push_to_hub()``
   model.save("ppo-CartPole-v1")
 
   # Push this saved model .zip file to the hf repo
-  # If this repo does not exist it will be created
+  # If this repo does not exists it will be created
   ## repo_id = id of the model repository from the Hugging Face Hub (repo_id = {organization}/{repo_name})
   ## filename: the name of the file == "name" inside model.save("ppo-CartPole-v1")
   push_to_hub(

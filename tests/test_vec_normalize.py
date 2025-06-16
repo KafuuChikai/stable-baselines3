@@ -1,5 +1,5 @@
 import operator
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 import gymnasium as gym
 import numpy as np
@@ -22,7 +22,7 @@ ENV_ID = "Pendulum-v1"
 
 
 class DummyRewardEnv(gym.Env):
-    metadata: dict[str, Any] = {}
+    metadata: Dict[str, Any] = {}
 
     def __init__(self, return_reward_idx=0):
         self.action_space = spaces.Discrete(2)
@@ -39,7 +39,7 @@ class DummyRewardEnv(gym.Env):
         truncated = self.t == len(self.returned_rewards)
         return np.array([returned_value]), returned_value, terminated, truncated, {}
 
-    def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None):
+    def reset(self, *, seed: Optional[int] = None, options: Optional[Dict] = None):
         if seed is not None:
             super().reset(seed=seed)
         self.t = 0
@@ -62,7 +62,7 @@ class DummyDictEnv(gym.Env):
         )
         self.action_space = spaces.Box(low=-1, high=1, shape=(3,), dtype=np.float32)
 
-    def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None):
+    def reset(self, *, seed: Optional[int] = None, options: Optional[Dict] = None):
         if seed is not None:
             super().reset(seed=seed)
         return self.observation_space.sample(), {}
@@ -94,7 +94,7 @@ class DummyMixedDictEnv(gym.Env):
         )
         self.action_space = spaces.Box(low=-1, high=1, shape=(3,), dtype=np.float32)
 
-    def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None):
+    def reset(self, *, seed: Optional[int] = None, options: Optional[Dict] = None):
         if seed is not None:
             super().reset(seed=seed)
         return self.observation_space.sample(), {}
@@ -315,7 +315,7 @@ def test_get_original():
         assert not np.array_equal(orig_obs, obs)
         assert not np.array_equal(orig_rewards, rewards)
         np.testing.assert_allclose(venv.normalize_obs(orig_obs), obs)
-        np.testing.assert_allclose(venv.normalize_reward(orig_rewards), rewards, atol=1e-6)
+        np.testing.assert_allclose(venv.normalize_reward(orig_rewards), rewards)
 
 
 def test_get_original_dict():
@@ -484,7 +484,7 @@ def test_non_dict_obs_keys():
     with pytest.raises(ValueError, match=".*is applicable only.*"):
         _make_warmstart(lambda: DummyRewardEnv(), norm_obs_keys=["key"])
 
-    with pytest.raises(ValueError, match=".* explicitly pass the observation keys.*"):
+    with pytest.raises(ValueError, match=".* explicitely pass the observation keys.*"):
         _make_warmstart(lambda: DummyMixedDictEnv())
 
     # Ignore Discrete observation key

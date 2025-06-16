@@ -19,7 +19,7 @@ from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.envs import FakeImageEnv, IdentityEnv, IdentityEnvBox
 from stable_baselines3.common.save_util import load_from_pkl, open_path, save_to_pkl
-from stable_baselines3.common.utils import ConstantSchedule, FloatSchedule, get_device
+from stable_baselines3.common.utils import get_device
 from stable_baselines3.common.vec_env import DummyVecEnv
 
 MODEL_LIST = [PPO, A2C, TD3, SAC, DQN, DDPG]
@@ -340,7 +340,7 @@ def test_save_load_env_cnn(tmp_path, model_class):
     # clear file from os
     os.remove(tmp_path / "test_save.zip")
 
-    # Check we can load A2C/PPO models saved with SB3 < 1.7.0
+    # Check we can load models saved with SB3 < 1.7.0
     if model_class == A2C:
         del model.policy.pi_features_extractor
         model.save(tmp_path / "test_save")
@@ -758,16 +758,16 @@ def test_no_resource_warning(tmp_path):
 
     # check that files are properly closed
     # Create a PPO agent and save it
-    PPO("MlpPolicy", "CartPole-v1", device="cpu").save(tmp_path / "dqn_cartpole")
-    PPO.load(tmp_path / "dqn_cartpole", device="cpu")
+    PPO("MlpPolicy", "CartPole-v1").save(tmp_path / "dqn_cartpole")
+    PPO.load(tmp_path / "dqn_cartpole")
 
-    PPO("MlpPolicy", "CartPole-v1", device="cpu").save(str(tmp_path / "dqn_cartpole"))
-    PPO.load(str(tmp_path / "dqn_cartpole"), device="cpu")
+    PPO("MlpPolicy", "CartPole-v1").save(str(tmp_path / "dqn_cartpole"))
+    PPO.load(str(tmp_path / "dqn_cartpole"))
 
     # Do the same but in memory, should not close the file
     with tempfile.TemporaryFile() as fp:
-        PPO("MlpPolicy", "CartPole-v1", device="cpu").save(fp)
-        PPO.load(fp, device="cpu")
+        PPO("MlpPolicy", "CartPole-v1").save(fp)
+        PPO.load(fp)
         assert not fp.closed
 
     # Same but with replay buffer
@@ -783,94 +783,3 @@ def test_no_resource_warning(tmp_path):
         fp.seek(0)
         model.load_replay_buffer(fp)
         assert not fp.closed
-
-
-def test_cast_lr_schedule(tmp_path):
-    # See GH#1900
-    model = PPO("MlpPolicy", "Pendulum-v1", learning_rate=lambda t: t * np.sin(1.0))
-    # Note: for recent version of numpy, np.float64 is a subclass of float
-    # so we need to use type here
-    # assert isinstance(model.lr_schedule(1.0), float)
-    assert type(model.lr_schedule(1.0)) is float
-    assert np.allclose(model.lr_schedule(0.5), 0.5 * np.sin(1.0))
-    model.save(tmp_path / "ppo.zip")
-    model = PPO.load(tmp_path / "ppo.zip")
-    assert type(model.lr_schedule(1.0)) is float
-    assert np.allclose(model.lr_schedule(0.5), 0.5 * np.sin(1.0))
-
-
-def test_save_load_net_arch_none(tmp_path):
-    """
-    Test that the model is loaded correctly when net_arch is manually set to None.
-    See GH#1928
-    """
-    PPO("MlpPolicy", "CartPole-v1", policy_kwargs=dict(net_arch=None)).save(tmp_path / "ppo.zip")
-    model = PPO.load(tmp_path / "ppo.zip")
-    # None has been replaced by the default net arch
-    assert model.policy.net_arch is not None
-    os.remove(tmp_path / "ppo.zip")
-
-
-def test_save_load_no_target_params(tmp_path):
-    # Check we can load DQN models saved with SB3 < 2.4.0
-    model = DQN("MlpPolicy", "CartPole-v1", buffer_size=10000, learning_starts=4)
-    env = model.get_env()
-    # Include target net params
-    model.policy.optimizer = th.optim.Adam(model.policy.parameters(), lr=0.001)
-    model.save(tmp_path / "test_save")
-    with pytest.warns(UserWarning):
-        DQN.load(str(tmp_path / "test_save.zip"), env=env).learn(20)
-    os.remove(tmp_path / "test_save.zip")
-
-
-@pytest.mark.parametrize("model_class", [PPO])
-def test_save_load_backward_compatible(tmp_path, model_class):
-    """
-    Test that lambdas are working when saving/loading models.
-    See GH#2115
-    """
-
-    env = DummyVecEnv([lambda: IdentityEnvBox(-1, 1)])
-
-    model = model_class("MlpPolicy", env, n_steps=64, learning_rate=lambda _: 0.001, clip_range=lambda _: 0.3)
-    model.learn(total_timesteps=100)
-
-    model.save(tmp_path / "test_schedule_safe.zip")
-
-    model = model_class.load(tmp_path / "test_schedule_safe.zip", env=env)
-
-    assert model.learning_rate(0) == 0.001
-    assert model.learning_rate.__name__ == "<lambda>"
-
-    assert isinstance(model.clip_range, FloatSchedule)
-    assert model.clip_range.value_schedule(0) == 0.3
-
-
-@pytest.mark.parametrize("model_class", [PPO])
-def test_save_load_clip_range_portable(tmp_path, model_class):
-    """
-    Test that models using callable schedule classes (e.g., ConstantSchedule, LinearSchedule)
-    are saved and loaded correctly without segfaults across different machines.
-
-    This ensures that we don't serialize fragile lambda closures.
-    See GH#2115
-    """
-    # Create a simple env
-    env = DummyVecEnv([lambda: IdentityEnvBox(-1, 1)])
-
-    model = model_class("MlpPolicy", env)
-    model.learn(total_timesteps=100)
-
-    # Make sure that classes are used not lambdas by default
-    assert isinstance(model.clip_range, FloatSchedule)
-    assert isinstance(model.clip_range.value_schedule, ConstantSchedule)
-    assert model.clip_range.value_schedule.val == 0.2
-
-    model.save(tmp_path / "test_schedule_safe.zip")
-
-    model = model_class.load(tmp_path / "test_schedule_safe.zip", env=env)
-
-    # Check that the model is loaded correctly
-    assert isinstance(model.clip_range, FloatSchedule)
-    assert isinstance(model.clip_range.value_schedule, ConstantSchedule)
-    assert model.clip_range.value_schedule.val == 0.2

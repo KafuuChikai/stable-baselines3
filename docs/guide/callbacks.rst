@@ -29,25 +29,24 @@ You can find two examples of custom callbacks in the documentation: one for savi
 
         :param verbose: Verbosity level: 0 for no output, 1 for info messages, 2 for debug messages
         """
-        def __init__(self, verbose: int = 0):
+        def __init__(self, verbose=0):
             super().__init__(verbose)
             # Those variables will be accessible in the callback
             # (they are defined in the base class)
             # The RL model
             # self.model = None  # type: BaseAlgorithm
             # An alias for self.model.get_env(), the environment used for training
-            # self.training_env # type: VecEnv
+            # self.training_env = None  # type: Union[gym.Env, VecEnv, None]
             # Number of time the callback was called
             # self.n_calls = 0  # type: int
-            # num_timesteps = n_envs * n times env.step() was called
             # self.num_timesteps = 0  # type: int
             # local and global variables
-            # self.locals = {}  # type: Dict[str, Any]
-            # self.globals = {}  # type: Dict[str, Any]
+            # self.locals = None  # type: Dict[str, Any]
+            # self.globals = None  # type: Dict[str, Any]
             # The logger object, used to report things in the terminal
-            # self.logger # type: stable_baselines3.common.logger.Logger
-            # Sometimes, for event callback, it is useful
-            # to have access to the parent object
+            # self.logger = None  # stable_baselines3.common.logger
+            # # Sometimes, for event callback, it is useful
+            # # to have access to the parent object
             # self.parent = None  # type: Optional[BaseCallback]
 
         def _on_training_start(self) -> None:
@@ -143,7 +142,6 @@ Stable Baselines provides you with a set of common callbacks for:
 - evaluating the model periodically and saving the best one (:ref:`EvalCallback`)
 - chaining callbacks (:ref:`CallbackList`)
 - triggering callback on events (:ref:`EventCallback`, :ref:`EveryNTimesteps`)
-- logging data every N timesteps (:ref:`LogEveryNTimesteps`)
 - stopping the training early based on a reward threshold (:ref:`StopTrainingOnRewardThreshold <StopTrainingCallback>`)
 
 
@@ -314,7 +312,7 @@ An :ref:`EventCallback` that will trigger its child callback every ``n_steps`` t
 
 .. note::
 
-	Because of the way ``VecEnv`` work, ``n_steps`` is a lower bound between two events when using multiple environments.
+	Because of the way ``PPO1`` and ``TRPO`` work (they rely on MPI), ``n_steps`` is a lower bound between two events.
 
 
 .. code-block:: python
@@ -331,30 +329,7 @@ An :ref:`EventCallback` that will trigger its child callback every ``n_steps`` t
 
   model = PPO("MlpPolicy", "Pendulum-v1", verbose=1)
 
-  model.learn(20_000, callback=event_callback)
-
-.. _LogEveryNTimesteps:
-
-LogEveryNTimesteps
-^^^^^^^^^^^^^^^^^^
-
-A callback derived from :ref:`EveryNTimesteps` that will dump the logged data every ``n_steps`` timesteps.
-
-
-.. code-block:: python
-
-  import gymnasium as gym
-
-  from stable_baselines3 import PPO
-  from stable_baselines3.common.callbacks import LogEveryNTimesteps
-
-  event_callback = LogEveryNTimesteps(n_steps=1_000)
-
-  model = PPO("MlpPolicy", "Pendulum-v1", verbose=1)
-
-  # Disable auto-logging by passing `log_interval=None`
-  model.learn(10_000, callback=event_callback, log_interval=None)
-
+  model.learn(int(2e4), callback=event_callback)
 
 
 .. _StopTrainingOnMaxEpisodes:
@@ -412,7 +387,7 @@ It must be used with the :ref:`EvalCallback` and use the event triggered after e
 
     model = SAC("MlpPolicy", "Pendulum-v1", learning_rate=1e-3, verbose=1)
     # Almost infinite number of timesteps, but the training will stop early
-    # as soon as the number of consecutive evaluations without model
+    # as soon as the the number of consecutive evaluations without model
     # improvement is greater than 3
     model.learn(int(1e10), callback=eval_callback)
 

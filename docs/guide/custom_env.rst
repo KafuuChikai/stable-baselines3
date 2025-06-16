@@ -9,8 +9,8 @@ That is to say, your environment must implement the following methods (and inher
 
 .. note::
 
-  If you are using images as input, the observation must be of type ``np.uint8`` and be within a space ``Box`` bounded by [0, 255] (``Box(low=0, high=255, shape=(<your image shape>)``).
-  By default, the observation is normalized by SB3 pre-processing (dividing by 255 to have values in [0, 1], i.e. ``Box(low=0, high=1)``) when using CNN policies.
+  If you are using images as input, the observation must be of type ``np.uint8`` and be contained in [0, 255].
+  By default, the observation is normalized by SB3 pre-processing (dividing by 255 to have values in [0, 1]) when using CNN policies.
   Images can be either channel-first or channel-last.
 
   If you want to use ``CnnPolicy`` or ``MultiInputPolicy`` with image-like observation (3D tensor) that are already normalized, you must pass ``normalize_images=False``
@@ -23,24 +23,6 @@ That is to say, your environment must implement the following methods (and inher
   Although SB3 supports both channel-last and channel-first images as input, we recommend using the channel-first convention when possible.
   Under the hood, when a channel-last image is passed, SB3 uses a ``VecTransposeImage`` wrapper to re-order the channels.
 
-
-.. note::
-
-    SB3 doesn't support ``Discrete`` and ``MultiDiscrete`` spaces with ``start!=0``. However, you can update your environment or use a wrapper to make your env compatible with SB3:
-
-    .. code-block:: python
-
-        import gymnasium as gym
-
-        class ShiftWrapper(gym.Wrapper):
-        """Allow to use Discrete() action spaces with start!=0"""
-        def __init__(self, env: gym.Env) -> None:
-            super().__init__(env)
-            assert isinstance(env.action_space, gym.spaces.Discrete)
-            self.action_space = gym.spaces.Discrete(env.action_space.n, start=0)
-
-        def step(self, action: int):
-            return self.env.step(action + self.env.action_space.start)
 
 
 .. code-block:: python
@@ -102,7 +84,7 @@ To check that your environment follows the Gym interface that SB3 supports, plea
 
 Gymnasium also have its own `env checker <https://gymnasium.farama.org/api/utils/#gymnasium.utils.env_checker.check_env>`_ but it checks a superset of what SB3 supports (SB3 does not support all Gym features).
 
-We have created a `colab notebook <https://colab.research.google.com/github/araffin/rl-tutorial-jnrr19/blob/sb3/5_custom_gym_env.ipynb>`_ for a concrete example of creating a custom environment along with an example of using it with Stable-Baselines3 interface.
+We have created a `colab notebook <https://colab.research.google.com/github/araffin/rl-tutorial-jnrr19/blob/sb3/5_custom_gym_env.ipynb>`_ for a concrete example on creating a custom environment along with an example of using it with Stable-Baselines3 interface.
 
 Alternatively, you may look at Gymnasium `built-in environments <https://gymnasium.farama.org>`_.
 

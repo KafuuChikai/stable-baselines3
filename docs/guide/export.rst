@@ -31,52 +31,53 @@ to do inference in another framework.
 Export to ONNX
 -----------------
 
+As of June 2021, ONNX format  `doesn't support <https://github.com/onnx/onnx/issues/3033>`_ exporting models that use the ``broadcast_tensors`` functionality of pytorch. So in order to export the trained stable-baseline3 models in the ONNX format, we need to first remove the layers that use broadcasting. This can be done by creating a class that removes the unsupported layers.
 
-If you are using PyTorch 2.0+ and ONNX Opset 14+, you can easily export SB3 policies using the following code:
+The following examples are for ``MlpPolicy`` only, and are general examples. Note that you have to preprocess the observation the same way stable-baselines3 agent does (see ``common.preprocessing.preprocess_obs``).
 
+For PPO, assuming a shared feature extractor.
 
 .. warning::
 
-  The following returns normalized actions and doesn't include the `post-processing <https://github.com/DLR-RM/stable-baselines3/blob/a9273f968eaf8c6e04302a07d803eebfca6e7e86/stable_baselines3/common/policies.py#L370-L377>`_ step that is done with continuous actions
-  (clip or unscale the action to the correct space).
+  The following example is for continuous actions only.
+  When using discrete or binary actions, you must do some `post-processing <https://github.com/DLR-RM/stable-baselines3/blob/f3a35aa786ee41ffff599b99fa1607c067e89074/stable_baselines3/common/policies.py#L621-L637>`_
+  to obtain the action (e.g., convert action logits to action).
 
 
 .. code-block:: python
 
   import torch as th
-  from typing import Tuple
 
   from stable_baselines3 import PPO
-  from stable_baselines3.common.policies import BasePolicy
 
 
-  class OnnxableSB3Policy(th.nn.Module):
-      def __init__(self, policy: BasePolicy):
+  class OnnxablePolicy(th.nn.Module):
+      def __init__(self, extractor, action_net, value_net):
           super().__init__()
-          self.policy = policy
+          self.extractor = extractor
+          self.action_net = action_net
+          self.value_net = value_net
 
-      def forward(self, observation: th.Tensor) -> Tuple[th.Tensor, th.Tensor, th.Tensor]:
-          # NOTE: Preprocessing is included, but postprocessing
-          # (clipping/inscaling actions) is not,
-          # If needed, you also need to transpose the images so that they are channel first
-          # use deterministic=False if you want to export the stochastic policy
-          # policy() returns `actions, values, log_prob` for PPO
-          return self.policy(observation, deterministic=True)
+      def forward(self, observation):
+          # NOTE: You may have to process (normalize) observation in the correct
+          #       way before using this. See `common.preprocessing.preprocess_obs`
+          action_hidden, value_hidden = self.extractor(observation)
+          return self.action_net(action_hidden), self.value_net(value_hidden)
 
 
   # Example: model = PPO("MlpPolicy", "Pendulum-v1")
-  PPO("MlpPolicy", "Pendulum-v1").save("PathToTrainedModel")
   model = PPO.load("PathToTrainedModel.zip", device="cpu")
-
-  onnx_policy = OnnxableSB3Policy(model.policy)
+  onnxable_model = OnnxablePolicy(
+      model.policy.mlp_extractor, model.policy.action_net, model.policy.value_net
+  )
 
   observation_size = model.observation_space.shape
   dummy_input = th.randn(1, *observation_size)
   th.onnx.export(
-      onnx_policy,
+      onnxable_model,
       dummy_input,
       "my_ppo_model.onnx",
-      opset_version=17,
+      opset_version=9,
       input_names=["input"],
   )
 
@@ -92,15 +93,8 @@ If you are using PyTorch 2.0+ and ONNX Opset 14+, you can easily export SB3 poli
 
   observation = np.zeros((1, *observation_size)).astype(np.float32)
   ort_sess = ort.InferenceSession(onnx_path)
-  actions, values, log_prob = ort_sess.run(None, {"input": observation})
+  action, value = ort_sess.run(None, {"input": observation})
 
-  print(actions, values, log_prob)
-
-  # Check that the predictions are the same
-  with th.no_grad():
-      print(model.policy(th.as_tensor(observation), deterministic=True))
-
-For exporting ``MultiInputPolicy``, please have a look at `GH#1873 <https://github.com/DLR-RM/stable-baselines3/issues/1873#issuecomment-2710776085>`_.
 
 For SAC the procedure is similar. The example shown only exports the actor network as the actor is sufficient to roll out the trained policies.
 
@@ -114,16 +108,23 @@ For SAC the procedure is similar. The example shown only exports the actor netwo
   class OnnxablePolicy(th.nn.Module):
       def __init__(self, actor: th.nn.Module):
           super().__init__()
-          self.actor = actor
+          # Removing the flatten layer because it can't be onnxed
+          self.actor = th.nn.Sequential(
+              actor.latent_pi,
+              actor.mu,
+              # For gSDE
+              # th.nn.Hardtanh(min_val=-actor.clip_mean, max_val=actor.clip_mean),
+              # Squash the output
+              th.nn.Tanh(),
+          )
 
       def forward(self, observation: th.Tensor) -> th.Tensor:
-          # NOTE: You may have to postprocess (unnormalize) actions
-          # to the correct bounds (see commented code below)
-          return self.actor(observation, deterministic=True)
+          # NOTE: You may have to process (normalize) observation in the correct
+          #       way before using this. See `common.preprocessing.preprocess_obs`
+          return self.actor(observation)
 
 
   # Example: model = SAC("MlpPolicy", "Pendulum-v1")
-  SAC("MlpPolicy", "Pendulum-v1").save("PathToTrainedModel.zip")
   model = SAC.load("PathToTrainedModel.zip", device="cpu")
   onnxable_model = OnnxablePolicy(model.policy.actor)
 
@@ -133,7 +134,7 @@ For SAC the procedure is similar. The example shown only exports the actor netwo
       onnxable_model,
       dummy_input,
       "my_sac_actor.onnx",
-      opset_version=17,
+      opset_version=9,
       input_names=["input"],
   )
 
@@ -146,28 +147,15 @@ For SAC the procedure is similar. The example shown only exports the actor netwo
 
   observation = np.zeros((1, *observation_size)).astype(np.float32)
   ort_sess = ort.InferenceSession(onnx_path)
-  scaled_action = ort_sess.run(None, {"input": observation})[0]
-
-  print(scaled_action)
-
-  # Post-process: rescale to correct space
-  # Rescale the action from [-1, 1] to [low, high]
-  # low, high = model.action_space.low, model.action_space.high
-  # post_processed_action = low + (0.5 * (scaled_action + 1.0) * (high - low))
-
-  # Check that the predictions are the same
-  with th.no_grad():
-      print(model.actor(th.as_tensor(observation), deterministic=True))
+  action = ort_sess.run(None, {"input": observation})
 
 
-For more discussion around the topic, please refer to `GH#383 <https://github.com/DLR-RM/stable-baselines3/issues/383>`_ and `GH#1349 <https://github.com/DLR-RM/stable-baselines3/issues/1349>`_.
-
-
+For more discussion around the topic refer to this `issue. <https://github.com/DLR-RM/stable-baselines3/issues/383>`_
 
 Trace/Export to C++
 -------------------
 
-You can use PyTorch JIT to trace and save a trained model that can be reused in other applications
+You can use PyTorch JIT to trace and save a trained model that can be re-used in other applications
 (for instance inference code written in C++).
 
 There is a draft PR in the RL Zoo about C++ export: https://github.com/DLR-RM/rl-baselines3-zoo/pull/228

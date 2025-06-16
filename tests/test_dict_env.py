@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Dict, Optional
 
 import gymnasium as gym
 import numpy as np
@@ -72,7 +72,7 @@ class DummyDictEnv(gym.Env):
         terminated = truncated = False
         return self.observation_space.sample(), reward, terminated, truncated, {}
 
-    def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None):
+    def reset(self, *, seed: Optional[int] = None, options: Optional[Dict] = None):
         if seed is not None:
             self.observation_space.seed(seed)
         return self.observation_space.sample(), {}
@@ -117,11 +117,12 @@ def test_consistency(model_class):
     """
     use_discrete_actions = model_class == DQN
     dict_env = DummyDictEnv(use_discrete_actions=use_discrete_actions, vec_only=True)
-    dict_env.seed(10)
     dict_env = gym.wrappers.TimeLimit(dict_env, 100)
     env = gym.wrappers.FlattenObservation(dict_env)
+    dict_env.seed(10)
     obs, _ = dict_env.reset()
 
+    kwargs = {}
     n_steps = 256
 
     if model_class in {A2C, PPO}:
@@ -325,7 +326,7 @@ def test_vec_normalize(model_class):
 
 def test_dict_nested():
     """
-    Make sure we throw an appropriate error with nested Dict observation spaces
+    Make sure we throw an appropiate error with nested Dict observation spaces
     """
     # Test without manual wrapping to vec-env
     env = DummyDictEnv(nested_dict_obs=True)

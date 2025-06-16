@@ -20,8 +20,6 @@ RL Baselines3 Zoo provides a collection of pre-trained agents, scripts for train
 
 SB3 Contrib (experimental RL code, latest algorithms): https://github.com/Stable-Baselines-Team/stable-baselines3-contrib
 
-SBX (SB3 + Jax): https://github.com/araffin/sbx
-
 
 Main Features
 --------------
@@ -115,14 +113,12 @@ To cite this project in publications:
     url     = {http://jmlr.org/papers/v22/20-1364.html}
   }
 
-Note: If you need to refer to a specific version of SB3, you can also use the `Zenodo DOI <https://doi.org/10.5281/zenodo.8123988>`_.
-
 Contributing
 ------------
 
 To any interested in making the rl baselines better, there are still some improvements
 that need to be done.
-You can check issues in the `repository <https://github.com/DLR-RM/stable-baselines3/labels/help%20wanted>`_.
+You can check issues in the `repo <https://github.com/DLR-RM/stable-baselines3/issues>`_.
 
 If you want to contribute, please read `CONTRIBUTING.md <https://github.com/DLR-RM/stable-baselines3/blob/master/CONTRIBUTING.md>`_ first.
 

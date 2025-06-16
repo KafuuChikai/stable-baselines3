@@ -13,7 +13,6 @@ from stable_baselines3.common.callbacks import (
     CheckpointCallback,
     EvalCallback,
     EveryNTimesteps,
-    LogEveryNTimesteps,
     StopTrainingOnMaxEpisodes,
     StopTrainingOnNoModelImprovement,
     StopTrainingOnRewardThreshold,
@@ -63,12 +62,11 @@ def test_callbacks(tmp_path, model_class):
     checkpoint_on_event = CheckpointCallback(save_freq=1, save_path=log_folder, name_prefix="event")
 
     event_callback = EveryNTimesteps(n_steps=500, callback=checkpoint_on_event)
-    log_callback = LogEveryNTimesteps(n_steps=250)
 
     # Stop training if max number of episodes is reached
     callback_max_episodes = StopTrainingOnMaxEpisodes(max_episodes=100, verbose=1)
 
-    callback = CallbackList([checkpoint_callback, eval_callback, event_callback, log_callback, callback_max_episodes])
+    callback = CallbackList([checkpoint_callback, eval_callback, event_callback, callback_max_episodes])
     model.learn(500, callback=callback)
 
     # Check access to local variables
@@ -266,29 +264,3 @@ def test_checkpoint_additional_info(tmp_path):
     model = DQN.load(checkpoint_dir / "rl_model_200_steps.zip")
     model.load_replay_buffer(checkpoint_dir / "rl_model_replay_buffer_200_steps.pkl")
     VecNormalize.load(checkpoint_dir / "rl_model_vecnormalize_200_steps.pkl", dummy_vec_env)
-
-
-def test_eval_callback_chaining(tmp_path):
-    class DummyCallback(BaseCallback):
-        def _on_step(self):
-            # Check that the parent callback is an EvalCallback
-            assert isinstance(self.parent, EvalCallback)
-            assert hasattr(self.parent, "best_mean_reward")
-            return True
-
-    stop_on_threshold_callback = StopTrainingOnRewardThreshold(reward_threshold=-200, verbose=1)
-
-    eval_callback = EvalCallback(
-        gym.make("Pendulum-v1"),
-        best_model_save_path=tmp_path,
-        log_path=tmp_path,
-        eval_freq=32,
-        deterministic=True,
-        render=False,
-        callback_on_new_best=CallbackList([DummyCallback(), stop_on_threshold_callback]),
-        callback_after_eval=CallbackList([DummyCallback()]),
-        warn=False,
-    )
-
-    model = PPO("MlpPolicy", "Pendulum-v1", n_steps=64, n_epochs=1)
-    model.learn(64, callback=eval_callback)

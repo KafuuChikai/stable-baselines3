@@ -4,7 +4,7 @@
 Reinforcement Learning Tips and Tricks
 ======================================
 
-The aim of this section is to help you run reinforcement learning experiments.
+The aim of this section is to help you do reinforcement learning experiments.
 It covers general advice about RL (where to start, which algorithm to choose, how to evaluate an algorithm, ...),
 as well as tips and tricks when using a custom environment or implementing an RL algorithm.
 
@@ -14,40 +14,35 @@ as well as tips and tricks when using a custom environment or implementing an RL
   this section in more details. You can also find the `slides here <https://araffin.github.io/slides/rlvs-tips-tricks/>`_.
 
 
-.. note::
-
-	We also have a `video on Designing and Running Real-World RL Experiments <https://youtu.be/eZ6ZEpCi6D8>`_, slides `can be found online <https://araffin.github.io/slides/design-real-rl-experiments/>`_.
-
-
 General advice when using Reinforcement Learning
 ================================================
 
 TL;DR
 -----
 
-1. Read about RL and Stable-Baselines3 (SB3)
+1. Read about RL and Stable Baselines3
 2. Do quantitative experiments and hyperparameter tuning if needed
 3. Evaluate the performance using a separate test environment (remember to check wrappers!)
 4. For better performance, increase the training budget
 
 
-Like any other subject, if you want to work with RL, you should first read about it (we have a dedicated `resource page <rl.html>`_ to get you started) to understand what you are using.
-We also recommend that you read the Stable Baselines3 (SB3) documentation and do the `tutorial <https://github.com/araffin/rl-tutorial-jnrr19>`_.
-It covers basic usage and guides you towards more advanced concepts of the library (e.g. callbacks and wrappers).
+Like any other subject, if you want to work with RL, you should first read about it (we have a dedicated `resource page <rl.html>`_ to get you started)
+to understand what you are using. We also recommend you read Stable Baselines3 (SB3) documentation and do the `tutorial <https://github.com/araffin/rl-tutorial-jnrr19>`_.
+It covers basic usage and guide you towards more advanced concepts of the library (e.g. callbacks and wrappers).
 
 Reinforcement Learning differs from other machine learning methods in several ways. The data used to train the agent is collected
-through interactions with the environment by the agent itself (as opposed to, for example, supervised learning where you have a fixed dataset).
-This dependency can lead to a vicious circle: if the agent collects poor quality data (e.g. trajectories with no rewards), it will not improve and will continue to collect bad trajectories.
+through interactions with the environment by the agent itself (compared to supervised learning where you have a fixed dataset for instance).
+This dependence can lead to vicious circle: if the agent collects poor quality data (e.g., trajectories with no rewards), then it will not improve and continue to amass
+bad trajectories.
 
 This factor, among others, explains that results in RL may vary from one run to another (i.e., when only the seed of the pseudo-random generator changes).
-For this reason, you should always do several runs to obtain quantitative results.
+For this reason, you should always do several runs to have quantitative results.
 
-Good results in RL generally depend on finding appropriate hyperparameters.
-Recent algorithms (PPO, SAC, TD3, DroQ) normally require little hyperparameter tuning, however, *don't expect the default ones to work* in every environment.
+Good results in RL are generally dependent on finding appropriate hyperparameters. Recent algorithms (PPO, SAC, TD3, DroQ) normally require little hyperparameter tuning,
+however, *don't expect the default ones to work* on any environment.
 
 Therefore, we *highly recommend you* to take a look at the `RL zoo <https://github.com/DLR-RM/rl-baselines3-zoo>`_ (or the original papers) for tuned hyperparameters.
-A best practice when you apply RL to a new problem is to do automatic `hyperparameter optimization <https://araffin.github.io/post/hyperparam-tuning/>`_.
-Again, this is included in the `RL zoo <https://github.com/DLR-RM/rl-baselines3-zoo>`_.
+A best practice when you apply RL to a new problem is to do automatic hyperparameter optimization. Again, this is included in the `RL zoo <https://github.com/DLR-RM/rl-baselines3-zoo>`_.
 
 When applying RL to a custom problem, you should always normalize the input to the agent (e.g. using ``VecNormalize`` for PPO/A2C)
 and look at common preprocessing done on other environments (e.g. for `Atari <https://danieltakeshi.github.io/2016/11/25/frame-skipping-and-preprocessing-for-deep-q-networks-on-atari-2600-games/>`_, frame-stack, ...).
@@ -59,9 +54,9 @@ Current Limitations of RL
 
 You have to be aware of the current `limitations <https://www.alexirpan.com/2018/02/14/rl-hard.html>`_ of reinforcement learning.
 
-Model-free RL algorithms (i.e. all the algorithms implemented in SB3) are usually *sample inefficient*. They require a lot of samples (sometimes millions of interactions) to learn anything useful.
-That's why most of the successes in RL were achieved on games or in simulation only.
-For instance, in this `work <https://www.youtube.com/watch?v=aTDkYFZFWug>`_ by ETH Zurich, the ANYmal robot was trained in simulation only, and then tested in the real world.
+
+Model-free RL algorithms (i.e. all the algorithms implemented in SB) are usually *sample inefficient*. They require a lot of samples (sometimes millions of interactions) to learn something useful.
+That's why most of the successes in RL were achieved on games or in simulation only. For instance, in this `work <https://www.youtube.com/watch?v=aTDkYFZFWug>`_ by ETH Zurich, the ANYmal robot was trained in simulation only, and then tested in the real world.
 
 As a general advice, to obtain better performances, you should augment the budget of the agent (number of training timesteps).
 
@@ -70,9 +65,9 @@ In order to achieve the desired behavior, expert knowledge is often required to 
 This *reward engineering* (or *RewArt* as coined by `Freek Stulp <http://www.freekstulp.net/>`_), necessitates several iterations. As a good example of reward shaping,
 you can take a look at `Deep Mimic paper <https://xbpeng.github.io/projects/DeepMimic/index.html>`_ which combines imitation learning and reinforcement learning to do acrobatic moves.
 
-A final limitation of RL is the instability of training. That is, you can observe a huge drop in performance during training.
+One last limitation of RL is the instability of training. That is to say, you can observe during training a huge drop in performance.
 This behavior is particularly present in ``DDPG``, that's why its extension ``TD3`` tries to tackle that issue.
-Other methods, such as ``TRPO`` or ``PPO`` use a *trust region* to minimize this problem by avoiding too large updates.
+Other method, like ``TRPO`` or ``PPO`` make use of a *trust region* to minimize that problem by avoiding too large update.
 
 
 How to evaluate an RL algorithm?
@@ -83,8 +78,9 @@ How to evaluate an RL algorithm?
   Pay attention to environment wrappers when evaluating your agent and comparing results to others' results. Modifications to episode rewards
   or lengths may also affect evaluation results which may not be desirable. Check ``evaluate_policy`` helper function in :ref:`Evaluation Helper <eval>` section.
 
-Because most algorithms use exploration noise during training, you need a separate test environment to evaluate the performance of your agent at a given time.
-It is recommended to periodically evaluate your agent for ``n`` test episodes (``n`` is usually between 5 and 20) and average the reward per episode to have a good estimate.
+Because most algorithms use exploration noise during training, you need a separate test environment to evaluate the performance
+of your agent at a given time. It is recommended to periodically evaluate your agent for ``n`` test episodes (``n`` is usually between 5 and 20)
+and average the reward per episode to have a good estimate.
 
 .. note::
 
@@ -107,19 +103,19 @@ and this `issue <https://github.com/hill-a/stable-baselines/issues/199>`_ by Cé
 Which algorithm should I use?
 =============================
 
-There is no silver bullet in RL, you can choose one or the other depending on your needs and problems.
+There is no silver bullet in RL, depending on your needs and problem, you may choose one or the other.
 The first distinction comes from your action space, i.e., do you have discrete (e.g. LEFT, RIGHT, ...)
 or continuous actions (ex: go to a certain speed)?
 
-Some algorithms are only tailored for one or the other domain: ``DQN`` supports only discrete actions, while ``SAC`` is restricted to continuous actions.
+Some algorithms are only tailored for one or the other domain: ``DQN`` only supports discrete actions, where ``SAC`` is restricted to continuous actions.
 
-The second difference that will help you decide is whether you can parallelize your training or not.
+The second difference that will help you choose is whether you can parallelize your training or not.
 If what matters is the wall clock training time, then you should lean towards ``A2C`` and its derivatives (PPO, ...).
 Take a look at the `Vectorized Environments <vec_envs.html>`_ to learn more about training with multiple workers.
 
-To accelerate training, you can also take a look at `SBX`_, which is SB3 + Jax, it has less features than SB3 but can be up to 20x faster than SB3 PyTorch thanks to JIT compilation of the gradient update.
+To accelerate training, you can also take a look at `SBX`_, which is SB3 + Jax, it has fewer features than SB3 but can be up to 20x faster than SB3 PyTorch thanks to JIT compilation of the gradient update.
 
-In sparse reward settings, we either recommend using either dedicated methods like HER (see below) or population-based algorithms like ARS (available in our :ref:`contrib repo <sb3_contrib>`).
+In sparse reward settings, we either recommend to use dedicated methods like HER (see below) or population-based algorithms like ARS (available in our :ref:`contrib repo <sb3_contrib>`).
 
 To sum it up:
 
@@ -150,7 +146,7 @@ Continuous Actions
 Continuous Actions - Single Process
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Current State Of The Art (SOTA) algorithms are ``SAC``, ``TD3``, ``CrossQ`` and ``TQC`` (available in our :ref:`contrib repo <sb3_contrib>` and :ref:`SBX (SB3 + Jax) repo <sbx>`).
+Current State Of The Art (SOTA) algorithms are ``SAC``, ``TD3`` and ``TQC`` (available in our :ref:`contrib repo <sb3_contrib>`).
 Please use the hyperparameters in the `RL zoo <https://github.com/DLR-RM/rl-baselines3-zoo>`_ for best results.
 
 If you want an extremely sample-efficient algorithm, we recommend using the `DroQ configuration <https://twitter.com/araffin2/status/1575439865222660098>`_ in `SBX`_ (it does many gradient steps per step in the environment).
@@ -159,7 +155,8 @@ If you want an extremely sample-efficient algorithm, we recommend using the `Dro
 Continuous Actions - Multiprocessed
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Take a look at ``PPO``, ``TRPO`` (available in our :ref:`contrib repo <sb3_contrib>`) or ``A2C``. Again, don't forget to take the hyperparameters from the `RL zoo <https://github.com/DLR-RM/rl-baselines3-zoo>`_ for continuous actions problems (cf *Bullet* envs).
+Take a look at ``PPO``, ``TRPO`` (available in our :ref:`contrib repo <sb3_contrib>`) or ``A2C``. Again, don't forget to take the hyperparameters from the `RL zoo <https://github.com/DLR-RM/rl-baselines3-zoo>`_
+for continuous actions problems (cf *Bullet* envs).
 
 .. note::
 
@@ -184,23 +181,26 @@ Tips and Tricks when creating a custom environment
 ==================================================
 
 If you want to learn about how to create a custom environment, we recommend you read this `page <custom_env.html>`_.
-We also provide a `colab notebook <https://colab.research.google.com/github/araffin/rl-tutorial-jnrr19/blob/master/5_custom_gym_env.ipynb>`_ for a concrete example of creating a custom gym environment.
+We also provide a `colab notebook <https://colab.research.google.com/github/araffin/rl-tutorial-jnrr19/blob/master/5_custom_gym_env.ipynb>`_ for
+a concrete example of creating a custom gym environment.
 
 Some basic advice:
 
-- always normalize your observation space if you can, i.e. if you know the boundaries
-- normalize your action space and make it symmetric if it is continuous (see potential problem below) A good practice is to rescale your actions so that they lie in [-1, 1]. This does not limit you, as you can easily rescale the action within the environment.
-- start with a shaped reward (i.e. informative reward) and a simplified version of your problem
-- debug with random actions to check if your environment works and follows the gym interface (with ``check_env``, see below)
+- always normalize your observation space when you can, i.e., when you know the boundaries
+- normalize your action space and make it symmetric when continuous (cf potential issue below) A good practice is to rescale your actions to lie in [-1, 1]. This does not limit you as you can easily rescale the action inside the environment
+- start with shaped reward (i.e. informative reward) and simplified version of your problem
+- debug with random actions to check that your environment works and follows the gym interface:
 
-Two important things to keep in mind when creating a custom environment are avoiding breaking the Markov assumption
+Two important things to keep in mind when creating a custom environment is to avoid breaking Markov assumption
 and properly handle termination due to a timeout (maximum number of steps in an episode).
-For example, if there is a time delay between action and observation (e.g. due to wifi communication), you should provide a history of observations as input.
+For instance, if there is some time delay between action and observation (e.g. due to wifi communication), you should give a history of observations
+as input.
 
 Termination due to timeout (max number of steps per episode) needs to be handled separately.
 You should return ``truncated = True``.
 If you are using the gym ``TimeLimit`` wrapper, this will be done automatically.
-You can read `Time Limit in RL <https://arxiv.org/abs/1712.00378>`_, take a look at the `Designing and Running Real-World RL Experiments video <https://youtu.be/eZ6ZEpCi6D8>`_ or `RL Tips and Tricks video <https://www.youtube.com/watch?v=Ikngt0_DXJg>`_ for more details.
+You can read `Time Limit in RL <https://arxiv.org/abs/1712.00378>`_ or take a look at the `RL Tips and Tricks video <https://www.youtube.com/watch?v=Ikngt0_DXJg>`_
+for more details.
 
 
 We provide a helper to check that your environment runs without error:
@@ -232,8 +232,9 @@ If you want to quickly try a random agent on your environment, you can also do:
 **Why should I normalize the action space?**
 
 
-Most reinforcement learning algorithms rely on a `Gaussian distribution <https://araffin.github.io/post/sac-massive-sim/>`_ (initially centered at 0 with std 1) for continuous actions.
-So, if you forget to normalize the action space when using a custom environment, this can `harm learning <https://araffin.github.io/post/sac-massive-sim/>`_ and can be difficult to debug (cf attached image and `issue #473 <https://github.com/hill-a/stable-baselines/issues/473>`_).
+Most reinforcement learning algorithms rely on a Gaussian distribution (initially centered at 0 with std 1) for continuous actions.
+So, if you forget to normalize the action space when using a custom environment,
+this can harm learning and be difficult to debug (cf attached image and `issue #473 <https://github.com/hill-a/stable-baselines/issues/473>`_).
 
 .. figure:: ../_static/img/mistake.png
 
@@ -250,12 +251,6 @@ A better solution would be to use a squashing function (cf ``SAC``) or a Beta di
 
 Tips and Tricks when implementing an RL algorithm
 =================================================
-
-.. note::
-
-  We have a `video on YouTube about reliable RL <https://www.youtube.com/watch?v=7-PUg9EAa3Y>`_ that covers
-  this section in more details. You can also find the `slides online <https://araffin.github.io/slides/tips-reliable-rl/>`_.
-
 
 When you try to reproduce a RL paper by implementing the algorithm, the `nuts and bolts of RL research <http://joschu.net/docs/nuts-and-bolts.pdf>`_
 by John Schulman are quite useful (`video <https://www.youtube.com/watch?v=8EcdaCk9KaQ>`_).

@@ -23,7 +23,7 @@ Notes
 
 - Original paper: https://arxiv.org/abs/1707.06347
 - Clear explanation of PPO on Arxiv Insights channel: https://www.youtube.com/watch?v=5P7I-xPq8u8
-- OpenAI blog post: https://openai.com/research/openai-baselines-ppo
+- OpenAI blog post: https://blog.openai.com/openai-baselines-ppo/
 - Spinning Up guide: https://spinningup.openai.com/en/latest/algorithms/ppo.html
 - 37 implementation details blog: https://iclr-blog-track.github.io/2022/03/25/ppo-implementation-details/
 
@@ -87,23 +87,6 @@ Train a PPO agent on ``CartPole-v1`` using 4 environments.
       obs, rewards, dones, info = vec_env.step(action)
       vec_env.render("human")
 
-
-.. note::
-
-  PPO is meant to be run primarily on the CPU, especially when you are not using a CNN. To improve CPU utilization, try turning off the GPU and using ``SubprocVecEnv`` instead of the default ``DummyVecEnv``:
-
-  .. code-block:: python
-
-    from stable_baselines3 import PPO
-    from stable_baselines3.common.env_util import make_vec_env
-    from stable_baselines3.common.vec_env import SubprocVecEnv
-
-    if __name__=="__main__":
-        env = make_vec_env("CartPole-v1", n_envs=8, vec_env_cls=SubprocVecEnv)
-        model = PPO("MlpPolicy", env, device="cpu")
-        model.learn(total_timesteps=25_000)
-
-  For more information, see :ref:`Vectorized Environments <vec_env>`, `Issue #1245 <https://github.com/DLR-RM/stable-baselines3/issues/1245#issuecomment-1435766949>`_ or the `Multiprocessing notebook <https://colab.research.google.com/github/Stable-Baselines-Team/rl-colab-notebooks/blob/sb3/multiprocessing_rl.ipynb>`_.
 
 Results
 -------
@@ -177,8 +160,6 @@ Parameters
   :members:
   :inherited-members:
 
-
-.. _ppo_policies:
 
 PPO Policies
 -------------

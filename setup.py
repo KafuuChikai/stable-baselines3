@@ -43,7 +43,7 @@ import gymnasium
 
 from stable_baselines3 import PPO
 
-env = gymnasium.make("CartPole-v1", render_mode="human")
+env = gymnasium.make("CartPole-v1")
 
 model = PPO("MlpPolicy", env, verbose=1)
 model.learn(total_timesteps=10_000)
@@ -70,15 +70,39 @@ model = PPO("MlpPolicy", "CartPole-v1").learn(10_000)
 
 """  # noqa:E501
 
+# Atari Games download is sometimes problematic:
+# https://github.com/Farama-Foundation/AutoROM/issues/39
+# That's why we define extra packages without it.
+extra_no_roms = [
+    # For render
+    "opencv-python",
+    "pygame",
+    # Tensorboard support
+    "tensorboard>=2.9.1",
+    # Checking memory taken by replay buffer
+    "psutil",
+    # For progress bar callback
+    "tqdm",
+    "rich",
+    # For atari games,
+    "shimmy[atari]~=1.3.0",
+    "pillow",
+]
+
+extra_packages = extra_no_roms + [  # noqa: RUF005
+    # For atari roms,
+    "autorom[accept-rom-license]~=0.6.1",
+]
+
 
 setup(
     name="stable_baselines3",
     packages=[package for package in find_packages() if package.startswith("stable_baselines3")],
     package_data={"stable_baselines3": ["py.typed", "version.txt"]},
     install_requires=[
-        "gymnasium>=0.29.1,<1.2.0",
-        "numpy>=1.20,<3.0",
-        "torch>=2.3,<3.0",
+        "gymnasium>=0.28.1,<0.30",
+        "numpy>=1.20",
+        "torch>=1.13",
         # For saving models
         "cloudpickle",
         # For reading logs
@@ -96,12 +120,12 @@ setup(
             # Type check
             "mypy",
             # Lint code and sort imports (flake8 and isort replacement)
-            "ruff>=0.3.1",
+            "ruff>=0.0.288",
             # Reformat
-            "black>=25.1.0,<26",
+            "black>=23.9.1,<24",
         ],
         "docs": [
-            "sphinx>=5,<9",
+            "sphinx>=5,<8",
             "sphinx-autobuild",
             "sphinx-rtd-theme>=1.3.0",
             # For spelling
@@ -109,21 +133,8 @@ setup(
             # Copy button for code snippets
             "sphinx_copybutton",
         ],
-        "extra": [
-            # For render
-            "opencv-python",
-            "pygame",
-            # Tensorboard support
-            "tensorboard>=2.9.1",
-            # Checking memory taken by replay buffer
-            "psutil",
-            # For progress bar callback
-            "tqdm",
-            "rich",
-            # For atari games,
-            "ale-py>=0.9.0",
-            "pillow",
-        ],
+        "extra": extra_packages,
+        "extra_no_roms": extra_no_roms,
     },
     description="Pytorch version of Stable Baselines, implementations of reinforcement learning algorithms.",
     author="Antonin Raffin",
@@ -135,7 +146,7 @@ setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     version=__version__,
-    python_requires=">=3.9",
+    python_requires=">=3.8",
     # PyPI package information.
     project_urls={
         "Code": "https://github.com/DLR-RM/stable-baselines3",
@@ -147,10 +158,10 @@ setup(
     },
     classifiers=[
         "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
-        "Programming Language :: Python :: 3.12",
     ],
 )
 

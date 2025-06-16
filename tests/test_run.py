@@ -1,7 +1,6 @@
 import gymnasium as gym
 import numpy as np
 import pytest
-import torch as th
 
 from stable_baselines3 import A2C, DDPG, DQN, PPO, SAC, TD3
 from stable_baselines3.common.env_util import make_vec_env
@@ -212,11 +211,8 @@ def test_warn_dqn_multi_env():
 
 
 def test_ppo_warnings():
-    """
-    Test that PPO warns and errors correctly on
-    problematic rollout buffer sizes,
-    and recommend using CPU.
-    """
+    """Test that PPO warns and errors correctly on
+    problematic rollout buffer sizes"""
 
     # Only 1 step: advantage normalization will return NaN
     with pytest.raises(AssertionError):
@@ -238,9 +234,3 @@ def test_ppo_warnings():
     loss = model.logger.name_to_value["train/loss"]
     assert loss > 0
     assert not np.isnan(loss)  # check not nan (since nan does not equal nan)
-
-    with pytest.warns(UserWarning, match="You are trying to run PPO on the GPU"):
-        model = PPO("MlpPolicy", "Pendulum-v1")
-        # Pretend to be on the GPU
-        model.device = th.device("cuda")
-        model._maybe_recommend_cpu()

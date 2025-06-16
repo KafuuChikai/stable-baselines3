@@ -71,7 +71,7 @@ In the following example, we will train, save and load a DQN model on the Lunar 
 
 
   # Create environment
-  env = gym.make("LunarLander-v3", render_mode="rgb_array")
+  env = gym.make("LunarLander-v2", render_mode="rgb_array")
 
   # Instantiate the agent
   model = DQN("MlpPolicy", env, verbose=1)
@@ -128,7 +128,7 @@ Multiprocessing: Unleashing the Power of Vectorized Environments
 
       :param env_id: the environment ID
       :param num_env: the number of environments you wish to have in subprocesses
-      :param seed: the initial seed for RNG
+      :param seed: the inital seed for RNG
       :param rank: index of the subprocess
       """
       def _init():
@@ -179,9 +179,9 @@ Multiprocessing with off-policy algorithms
 
   vec_env = make_vec_env("Pendulum-v0", n_envs=4, seed=0)
 
-  # We collect 4 transitions per call to `env.step()`
-  # and performs 2 gradient steps per call to `env.step()`
-  # if gradient_steps=-1, then we would do 4 gradients steps per call to `env.step()`
+  # We collect 4 transitions per call to `ènv.step()`
+  # and performs 2 gradient steps per call to `ènv.step()`
+  # if gradient_steps=-1, then we would do 4 gradients steps per call to `ènv.step()`
   model = SAC("MlpPolicy", vec_env, train_freq=1, gradient_steps=2, verbose=1)
   model.learn(total_timesteps=10_000)
 
@@ -247,7 +247,7 @@ If your callback returns False, training is aborted early.
 
       :param check_freq:
       :param log_dir: Path to the folder where the model will be saved.
-        It must contain the file created by the ``Monitor`` wrapper.
+        It must contains the file created by the ``Monitor`` wrapper.
       :param verbose: Verbosity level: 0 for no output, 1 for info messages, 2 for debug messages
       """
       def __init__(self, check_freq: int, log_dir: str, verbose: int = 1):
@@ -289,7 +289,7 @@ If your callback returns False, training is aborted early.
   os.makedirs(log_dir, exist_ok=True)
 
   # Create and wrap the environment
-  env = gym.make("LunarLanderContinuous-v3")
+  env = gym.make("LunarLanderContinuous-v2")
   env = Monitor(env, log_dir)
 
   # Add some action noise for exploration
@@ -364,7 +364,7 @@ Atari Games
 
 Training a RL agent on Atari games is straightforward thanks to ``make_atari_env`` helper function.
 It will do `all the preprocessing <https://danieltakeshi.github.io/2016/11/25/frame-skipping-and-preprocessing-for-deep-q-networks-on-atari-2600-games/>`_
-and multiprocessing for you. To install the Atari environments, run the command ``pip install gymnasium[atari,accept-rom-license]`` to install the Atari environments and ROMs, or install Stable Baselines3 with ``pip install stable-baselines3[extra]`` to install this and other optional dependencies.
+and multiprocessing for you. To install the Atari environments, run the command ``pip install gym[atari, accept-rom-license]`` to install the Atari environments and ROMs, or install Stable Baselines3 with ``pip install stable-baselines3[extra]`` to install this and other optional dependencies.
 
 .. image:: ../_static/img/colab-badge.svg
    :target: https://colab.research.google.com/github/Stable-Baselines-Team/rl-colab-notebooks/blob/sb3/atari_games.ipynb
@@ -375,8 +375,6 @@ and multiprocessing for you. To install the Atari environments, run the command 
   from stable_baselines3.common.env_util import make_atari_env
   from stable_baselines3.common.vec_env import VecFrameStack
   from stable_baselines3 import A2C
-
-  import ale_py
 
   # There already exists an environment generator
   # that will make and wrap atari environments correctly.
@@ -399,14 +397,14 @@ PyBullet: Normalizing input features
 ------------------------------------
 
 Normalizing input features may be essential to successful training of an RL agent
-(by default, images are scaled, but other types of input are not),
-for instance when training on `PyBullet <https://github.com/bulletphysics/bullet3/>`__ environments.
-For this, there is a wrapper ``VecNormalize`` that will compute a running average and standard deviation of the input features (it can do the same for rewards).
+(by default, images are scaled but not other types of input),
+for instance when training on `PyBullet <https://github.com/bulletphysics/bullet3/>`__ environments. For that, a wrapper exists and
+will compute a running average and standard deviation of input features (it can do the same for rewards).
 
 
 .. note::
 
-	you need to install pybullet envs with ``pip install pybullet_envs_gymnasium``
+	you need to install pybullet with ``pip install pybullet``
 
 
 .. image:: ../_static/img/colab-badge.svg
@@ -415,41 +413,44 @@ For this, there is a wrapper ``VecNormalize`` that will compute a running averag
 
 .. code-block:: python
 
-    from pathlib import Path
+  import os
+  import gymnasium as gym
+  import pybullet_envs
 
-    import pybullet_envs_gymnasium
+  from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
+  from stable_baselines3 import PPO
 
-    from stable_baselines3.common.vec_env import VecNormalize
-    from stable_baselines3.common.env_util import make_vec_env
-    from stable_baselines3 import PPO
+  # Note: pybullet is not compatible yet with Gymnasium
+  # you might need to use `import rl_zoo3.gym_patches`
+  # and use gym (not Gymnasium) to instantiate the env
+  # Alternatively, you can use the MuJoCo equivalent "HalfCheetah-v4"
+  vec_env = DummyVecEnv([lambda: gym.make("HalfCheetahBulletEnv-v0")])
+  # Automatically normalize the input features and reward
+  vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=True,
+                     clip_obs=10.)
 
-    # Alternatively, you can use the MuJoCo equivalent "HalfCheetah-v4"
-    vec_env = make_vec_env("HalfCheetahBulletEnv-v0", n_envs=1)
-    # Automatically normalize the input features and reward
-    vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=True, clip_obs=10.0)
+  model = PPO("MlpPolicy", vec_env)
+  model.learn(total_timesteps=2000)
 
-    model = PPO("MlpPolicy", vec_env)
-    model.learn(total_timesteps=2000)
+  # Don't forget to save the VecNormalize statistics when saving the agent
+  log_dir = "/tmp/"
+  model.save(log_dir + "ppo_halfcheetah")
+  stats_path = os.path.join(log_dir, "vec_normalize.pkl")
+  env.save(stats_path)
 
-    # Don't forget to save the VecNormalize statistics when saving the agent
-    log_dir = Path("/tmp/")
-    model.save(log_dir / "ppo_halfcheetah")
-    stats_path = log_dir / "vec_normalize.pkl"
-    vec_env.save(stats_path)
+  # To demonstrate loading
+  del model, vec_env
 
-    # To demonstrate loading
-    del model, vec_env
+  # Load the saved statistics
+  vec_env = DummyVecEnv([lambda: gym.make("HalfCheetahBulletEnv-v0")])
+  vec_env = VecNormalize.load(stats_path, vec_env)
+  #  do not update them at test time
+  vec_env.training = False
+  # reward normalization is not needed at test time
+  vec_env.norm_reward = False
 
-    # Load the saved statistics
-    vec_env = make_vec_env("HalfCheetahBulletEnv-v0", n_envs=1)
-    vec_env = VecNormalize.load(stats_path, vec_env)
-    #  do not update them at test time
-    vec_env.training = False
-    # reward normalization is not needed at test time
-    vec_env.norm_reward = False
-
-    # Load the agent
-    model = PPO.load(log_dir / "ppo_halfcheetah", env=vec_env)
+  # Load the agent
+  model = PPO.load(log_dir + "ppo_halfcheetah", env=vec_env)
 
 
 Hindsight Experience Replay (HER)
@@ -702,7 +703,7 @@ A2C policy gradient updates on the model.
       if ("policy" in key or "shared_net" in key or "action" in key)
   )
 
-  # population size of 50 individuals
+  # population size of 50 invdiduals
   pop_size = 50
   # Keep top 10%
   n_elite = pop_size // 10
@@ -735,40 +736,41 @@ A2C policy gradient updates on the model.
       print(f"Best fitness: {top_candidates[0][1]:.2f}")
 
 
-SB3 with Isaac Lab, Brax, Procgen, EnvPool
-------------------------------------------
+SB3 and ProcgenEnv
+------------------
 
-Some massively parallel simulations such as `EnvPool <https://github.com/sail-sg/envpool>`_, `Isaac Lab <https://github.com/isaac-sim/IsaacLab>`_, `Brax <https://github.com/google/brax>`_ or `ProcGen <https://github.com/Farama-Foundation/Procgen2>`_ already produce a vectorized environment to speed up data collection (see discussion in `issue #314 <https://github.com/DLR-RM/stable-baselines3/issues/314>`_).
-
-To use SB3 with these tools, you need to wrap the env with tool-specific ``VecEnvWrapper`` that pre-processes the data for SB3,
-you can find links to some of these wrappers in `issue #772 <https://github.com/DLR-RM/stable-baselines3/issues/772#issuecomment-1048657002>`_.
-
-- Isaac Lab wrapper: `link <https://github.com/isaac-sim/IsaacLab/blob/main/source/extensions/omni.isaac.lab_tasks/omni/isaac/lab_tasks/utils/wrappers/sb3.py>`__
-- Brax: `link <https://gist.github.com/araffin/a7a576ec1453e74d9bb93120918ef7e7>`__
-- EnvPool: `link <https://github.com/sail-sg/envpool/blob/main/examples/sb3_examples/ppo.py>`__
-
-
-SB3 with DeepMind Control (dm_control)
---------------------------------------
-
-If you want to use SB3 with `dm_control <https://github.com/google-deepmind/dm_control>`_, you need to use two wrappers (one from `shimmy <https://github.com/Farama-Foundation/Shimmy>`_, one pre-built one) to convert it to a Gymnasium compatible environment:
+Some environments like `Procgen <https://github.com/openai/procgen>`_ already produce a vectorized
+environment (see discussion in `issue #314 <https://github.com/DLR-RM/stable-baselines3/issues/314>`_). In order to use it with SB3, you must wrap it in a ``VecMonitor`` wrapper which will also allow
+to keep track of the agent progress.
 
 .. code-block:: python
 
-    import shimmy
-    import stable_baselines3 as sb3
-    from dm_control import suite
-    from gymnasium.wrappers import FlattenObservation
+  from procgen import ProcgenEnv
 
-    # Available envs:
-    # suite._DOMAINS and suite.dog.SUITE
+  from stable_baselines3 import PPO
+  from stable_baselines3.common.vec_env import VecExtractDictObs, VecMonitor
 
-    env = suite.load(domain_name="dog", task_name="run")
-    gym_env = FlattenObservation(shimmy.DmControlCompatibilityV0(env))
+  # ProcgenEnv is already vectorized
+  venv = ProcgenEnv(num_envs=2, env_name="starpilot")
 
-    model = sb3.PPO("MlpPolicy", gym_env, verbose=1)
-    model.learn(10_000, progress_bar=True)
+  # To use only part of the observation:
+  # venv = VecExtractDictObs(venv, "rgb")
 
+  # Wrap with a VecMonitor to collect stats and avoid errors
+  venv = VecMonitor(venv=venv)
+
+  model = PPO("MultiInputPolicy", venv, verbose=1)
+  model.learn(10_000)
+
+
+SB3 with EnvPool or Isaac Gym
+-----------------------------
+
+Just like Procgen (see above), `EnvPool <https://github.com/sail-sg/envpool>`_ and `Isaac Gym <https://github.com/NVIDIA-Omniverse/IsaacGymEnvs>`_ accelerate the environment by
+already providing a vectorized implementation.
+
+To use SB3 with those tools, you must wrap the env with tool's specific ``VecEnvWrapper`` that will pre-process the data for SB3,
+you can find links to those wrappers in `issue #772 <https://github.com/DLR-RM/stable-baselines3/issues/772#issuecomment-1048657002>`_.
 
 
 Record a Video
@@ -816,7 +818,7 @@ Bonus: Make a GIF of a Trained Agent
 
   from stable_baselines3 import A2C
 
-  model = A2C("MlpPolicy", "LunarLander-v3").learn(100_000)
+  model = A2C("MlpPolicy", "LunarLander-v2").learn(100_000)
 
   images = []
   obs = model.env.reset()
