@@ -873,6 +873,7 @@ class ActorCriticSharePolicy(BasePolicy):
         optimizer_kwargs: Optional[Dict[str, Any]] = None,
         value_activation_fn: Optional[Type[nn.Module]] = None,
         use_layer_norm: bool = False,
+        output_activation_fn: Optional[Type[nn.Module]] = nn.Tanh,
     ):
         if optimizer_kwargs is None:
             optimizer_kwargs = {}
@@ -914,6 +915,7 @@ class ActorCriticSharePolicy(BasePolicy):
         self.value_activation_fn = value_activation_fn
         self.ortho_init = ortho_init
         self.use_layer_norm = use_layer_norm
+        self.output_activation_fn = output_activation_fn() if output_activation_fn is not None else None
 
         self.pi_features_extractor = self.make_features_extractor(self.observation_space)
         self.vf_features_extractor = self.make_features_extractor(self.share_observation_space)
@@ -1269,6 +1271,8 @@ class ActorCriticSharePolicy(BasePolicy):
         with th.no_grad():
             actions = self._predict(obs_tensor, deterministic=deterministic)
         # Convert to numpy, and reshape to the original action shape
+        if self.output_activation_fn is not None:
+            actions = self.output_activation_fn(actions)
         actions = actions.cpu().numpy().reshape((-1, *self.action_space.shape))  # type: ignore[misc]
 
         if isinstance(self.action_space, spaces.Box):
@@ -1278,8 +1282,12 @@ class ActorCriticSharePolicy(BasePolicy):
             else:
                 # Actions could be on arbitrary scale, so clip the actions to avoid
                 # out of bound error (e.g. if sampling from a Gaussian distribution)
-                # actions = np.tanh(actions)  # type: ignore[assignment, arg-type]
-                actions = np.clip(actions, self.action_space.low, self.action_space.high)  # type: ignore[assignment, arg-type]
+                if self.output_activation_fn is not None:
+                    # If the output activation function is used, we assume it already
+                    # ensures the actions are in the right range, so we do not clip.
+                    pass
+                else:
+                    actions = np.clip(actions, self.action_space.low, self.action_space.high)  # type: ignore[assignment, arg-type]
 
         # Remove batch dimension if needed
         if not vectorized_env:
