@@ -873,7 +873,7 @@ class ActorCriticSharePolicy(BasePolicy):
         optimizer_kwargs: Optional[Dict[str, Any]] = None,
         value_activation_fn: Optional[Type[nn.Module]] = None,
         use_layer_norm: bool = False,
-        output_activation_fn: Optional[Type[nn.Module]] = nn.Tanh,
+        output_activation_fn: Optional[Type[nn.Module]] = None,
     ):
         if optimizer_kwargs is None:
             optimizer_kwargs = {}
